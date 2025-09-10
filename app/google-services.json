@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:993661192408:android:0ca3bd89b82fe31d3cafad",
         "android_client_info": {
-          "package_name": "com.company.medalert"
+          "package_name": "com.example.medalert"
         }
       },
       "oauth_client": [],
