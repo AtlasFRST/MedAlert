@@ -20,13 +20,14 @@ class MainActivity : AppCompatActivity() {
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
-
+        //launches signup activity
         findViewById<Button>(R.id.MainSignupB).setOnClickListener {
             val intent = Intent(this, SignupActivity::class.java)
 
             startActivity(intent)
             finish()
         }
+        //launches login activity
         findViewById<Button>(R.id.MainLoginB).setOnClickListener {
             val intent = Intent(this, LoginActivity::class.java)
 
