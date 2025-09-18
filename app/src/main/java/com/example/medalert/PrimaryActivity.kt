@@ -24,5 +24,13 @@ class PrimaryActivity : AppCompatActivity() {
         val  userName = intent.getStringExtra(EXTRA_USERNAME)
         findViewById<TextView>(R.id.textView2).text = "$userName"
 
+        findViewById<Button>(R.id.ScannerActB).setOnClickListener {
+            Log.d("activity", "button clicked")
+            val intent = Intent(this, ScannerActivity::class.java)
+
+            startActivity(intent)
+            finish()
+        }
+
     }
 }
