@@ -27,6 +27,10 @@ android {
             )
         }
     }
+
+    buildFeatures {
+        viewBinding = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -50,4 +54,16 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
+    // CameraX dependencies (version 1.3.0)
+    implementation("androidx.camera:camera-core:1.3.0")
+    implementation("androidx.camera:camera-camera2:1.3.0")
+    implementation("androidx.camera:camera-lifecycle:1.3.0")
+    implementation("androidx.camera:camera-view:1.3.0")
+    implementation("androidx.camera:camera-video:1.3.0")
+    // Lifecycle (required for binding CameraX to lifecycle)
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
+    // Activity and Fragment KTX extensions
+
+
+
 }
