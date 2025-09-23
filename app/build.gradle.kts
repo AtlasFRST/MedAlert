@@ -63,6 +63,9 @@ dependencies {
     // Lifecycle (required for binding CameraX to lifecycle)
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     // Activity and Fragment KTX extensions
+    implementation("com.google.mlkit:text-recognition:16.0.0")
+    implementation(libs.mlkit.text.recognition)
+    implementation(libs.camerax.extensions)
 
 
 

@@ -26,5 +26,11 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintLeft_toLeftOf="parent" />
 
+    <TextView
+        android:id="@+id/textOutput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Recognized text will appear here"
+        android:padding="16dp"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -3,6 +3,7 @@ package com.example.medalert
 import android.Manifest
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -34,6 +35,14 @@ import androidx.core.content.PermissionChecker
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import android.graphics.Bitmap
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+
+
+
 
 typealias LumaListener = (luma: Double) -> Unit
 
@@ -89,7 +98,9 @@ class ScannerActivity : AppCompatActivity() {
     }
     private lateinit var viewBinding: ActivityScannerBinding
 
-    private var imageCapture: ImageCapture? = null
+    val imageCapture = ImageCapture.Builder()
+        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+        .build()
 
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
@@ -106,23 +117,109 @@ class ScannerActivity : AppCompatActivity() {
         } else {
             requestPermissions()
         }
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+
+        cameraProviderFuture.addListener({
+
+            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder()
+
+                .build()
+
+                .also {
+
+                    it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
+
+                }
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            try {
+
+
+                // Unbind use cases before rebinding
+
+
+                cameraProvider.unbindAll()
+
+                // Bind use cases to camera
+                cameraProvider.bindToLifecycle(
+                    this, cameraSelector, preview
+                )
+
+            } catch (exc: Exception) {
+                Log.e(TAG, "Use case binding failed", exc)
+            }
+
+        }, ContextCompat.getMainExecutor(this))
 
         viewBinding.imageCaptureButton.setOnClickListener { takePhoto() }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
-    private fun takePhoto() {}
+    /**
+     * Captures a photo using CameraX's ImageCapture use case,
+     * converts the captured image to a Bitmap, and performs text recognition on it.
+     */
+    private fun takePhoto() {
 
-    private fun captureVideo() {}
+        imageCapture.takePicture(// Initiate image capture asynchronously using the cameraExecutor thread pool
+            cameraExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(imageProxy: ImageProxy) {// Called when the image has been successfully captured
+                    val bitmap = imageProxyToBitmap(imageProxy)// Convert the ImageProxy object to a Bitmap for ML Kit processing
+                    imageProxy.close()
 
-    private fun startCamera() {}
+                    val image = InputImage.fromBitmap(bitmap, 0)  // Create an ML Kit InputImage from the Bitmap without needing to rotate the image
+                   recognizeText(image)  // Call the function that processes the image and recognizes text
+                }
 
-    private fun requestPermissions() {
-        activityResultLauncher.launch(REQUIRED_PERMISSIONS)
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e("CameraX", "Photo capture failed", exception)
+                }
+            }
+        )
     }
 
-    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
+
+    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+
+        cameraProviderFuture.addListener({
+            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder()
+                .build()
+                .also {
+                    it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
+                }
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            try {
+                cameraProvider.unbindAll()
+
+                cameraProvider.bindToLifecycle(
+                    this,
+                    cameraSelector,
+                    preview,
+                    imageCapture
+                )
+
+            } catch (exc: Exception) {
+                Log.e(TAG, "Use case binding failed", exc)
+            }
+
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun requestPermissions() {
+        activityResultLauncher.launch(REQUIREDPERMISSIONS)
+    }
+
+    private fun allPermissionsGranted() = REQUIREDPERMISSIONS.all {
         ContextCompat.checkSelfPermission(
             baseContext, it) == PackageManager.PERMISSION_GRANTED
     }
@@ -138,11 +235,27 @@ class ScannerActivity : AppCompatActivity() {
         private val REQUIRED_PERMISSIONS =
             mutableListOf (
                 Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO
+                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO
+
             ).apply {
                 if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
                     add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 }
             }.toTypedArray()
     }
+
+    /*This function extracts the byte buffer from the first plane of the ImageProxy,
+    * which is assumed to be in JPEG format, and decodes it into a Bitmap.*/
+    private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap {
+        val planeProxy = imageProxy.planes[0] // Get the first plane of the image
+        val buffer = planeProxy.buffer // Get the underlying ByteBuffer from the plane
+        val bytes = ByteArray(buffer.remaining())  // Create a byte array the size of the buffer's remaining bytes
+        buffer.get(bytes)
+
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)  // Decode the byte array into a Bitmap and return it
+    }
+
+    private fun recognizeText(image: InputImage) {}
 }
