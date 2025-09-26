@@ -63,6 +63,7 @@ dependencies {
     // Lifecycle (required for binding CameraX to lifecycle)
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     // Activity and Fragment KTX extensions
+    implementation("com.firebaseui:firebase-ui-auth:9.0.0")
 
 
 

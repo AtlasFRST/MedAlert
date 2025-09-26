@@ -122,6 +122,8 @@ class ScannerActivity : AppCompatActivity() {
         activityResultLauncher.launch(REQUIRED_PERMISSIONS)
     }
 
+
+
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(
             baseContext, it) == PackageManager.PERMISSION_GRANTED

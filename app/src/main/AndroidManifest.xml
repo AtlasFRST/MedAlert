@@ -32,14 +32,6 @@
             </intent-filter>
         </activity>
         <activity
-            android:name=".LoginActivity"
-            android:exported="true">
-        </activity>
-        <activity
-            android:name=".SignupActivity"
-            android:exported="true">
-        </activity>
-        <activity
             android:name=".PrimaryActivity"
             android:exported="true">
         </activity>

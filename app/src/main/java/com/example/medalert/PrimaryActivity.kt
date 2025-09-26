@@ -4,13 +4,11 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
-import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import com.google.firebase.firestore.FirebaseFirestore
+
+import com.google.firebase.auth.FirebaseAuth
 
 class PrimaryActivity : AppCompatActivity() {
     companion object {
@@ -21,16 +19,30 @@ class PrimaryActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContentView(R.layout.activity_primary)
 
-        val  userName = intent.getStringExtra(EXTRA_USERNAME)
-        findViewById<TextView>(R.id.textView2).text = "$userName"
+        if(FirebaseAuth.getInstance().currentUser == null){
+            val intent = Intent(this, MainActivity::class.java)
+            startActivity(intent)
+            finish()
+        } else {
+            findViewById<TextView>(R.id.textView).text = "Welcome, ${FirebaseAuth.getInstance().currentUser?.displayName}!"
+        }
 
-        findViewById<Button>(R.id.ScannerActB).setOnClickListener {
+
+        findViewById<Button>(R.id.ScannerB).setOnClickListener {
             Log.d("activity", "button clicked")
             val intent = Intent(this, ScannerActivity::class.java)
 
             startActivity(intent)
             finish()
         }
+
+        findViewById<Button>(R.id.LogoutB).setOnClickListener {
+            FirebaseAuth.getInstance().signOut()
+            val intent = Intent(this, MainActivity::class.java)
+            startActivity(intent)
+            finish()
+        }
+
 
     }
 }
