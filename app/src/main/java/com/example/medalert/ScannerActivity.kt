@@ -1,59 +1,52 @@
 package com.example.medalert
 
 import android.Manifest
-import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.MediaStore
+import android.provider.Settings
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.ImageCapture
-import androidx.camera.video.Recorder
-import androidx.camera.video.Recording
-import androidx.camera.video.VideoCapture
+import androidx.camera.core.*
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.medalert.databinding.ActivityScannerBinding
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.core.Preview
-import androidx.camera.core.CameraSelector
-import android.util.Log
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
-import androidx.camera.video.FallbackStrategy
-import androidx.camera.video.MediaStoreOutputOptions
-import androidx.camera.video.Quality
-import androidx.camera.video.QualitySelector
-import androidx.camera.video.VideoRecordEvent
-import androidx.core.content.PermissionChecker
-import java.nio.ByteBuffer
-import java.text.SimpleDateFormat
-import java.util.Locale
 
-typealias LumaListener = (luma: Double) -> Unit
-
+@androidx.annotation.OptIn(ExperimentalGetImage::class)
 class ScannerActivity : AppCompatActivity() {
 
-    private val REQUIREDPERMISSIONS = mutableListOf(
-        Manifest.permission.CAMERA,
-        Manifest.permission.RECORD_AUDIO,
+    //create variables to bind to the execution time
+    private lateinit var viewBinding: ActivityScannerBinding
+    private lateinit var imageCapture: ImageCapture
+    private lateinit var cameraExecutor: ExecutorService
+
+    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
+    // Permissions based on API level
+    private val REQUIRED_PERMISSIONS = mutableListOf(
+        Manifest.permission.CAMERA
     ).apply {
-        when {
-            Build.VERSION.SDK_INT <= Build.VERSION_CODES.P -> {
-                add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            }
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
-                add(Manifest.permission.READ_MEDIA_IMAGES)
-                add(Manifest.permission.READ_MEDIA_VIDEO)
-            }
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            add(Manifest.permission.READ_MEDIA_IMAGES)
         }
     }.toTypedArray()
-    val activityResultLauncher = registerForActivityResult(
+
+    // Permission launcher
+    private val activityResultLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         var allGranted = true
@@ -64,69 +57,119 @@ class ScannerActivity : AppCompatActivity() {
                 if (!ActivityCompat.shouldShowRequestPermissionRationale(this, permission)) {
                     Toast.makeText(
                         this,
-                        "Permission $permission permanently denied. Please enable it from settings.",
+                        "Permission $permission permanently denied. Enable it from app settings.",
                         Toast.LENGTH_LONG
                     ).show()
+                    openAppSettings()
                 } else {
-                    Toast.makeText(
-                        this,
-                        "Permission $permission denied.",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    Toast.makeText(this, "Permission $permission denied.", Toast.LENGTH_SHORT).show()
                 }
             }
         }
 
-        if (allGranted) {
-            startCamera()
-        } else {
-            Toast.makeText(
-                baseContext,
-                "Required permissions not granted.",
-                Toast.LENGTH_SHORT
-            ).show()
-        }
+        if (allGranted) startCamera()
     }
-    private lateinit var viewBinding: ActivityScannerBinding
 
-    private var imageCapture: ImageCapture? = null
-
-    private var videoCapture: VideoCapture<Recorder>? = null
-    private var recording: Recording? = null
-
-    private lateinit var cameraExecutor: ExecutorService
-
+    //bind everything when created 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewBinding = ActivityScannerBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
+
+        cameraExecutor = Executors.newSingleThreadExecutor()
+
+        viewBinding.imageCaptureButton.setOnClickListener { takePhoto() } //button that calls the text recognition
 
         if (allPermissionsGranted()) {
             startCamera()
         } else {
             requestPermissions()
         }
-
-        viewBinding.imageCaptureButton.setOnClickListener { takePhoto() }
-
-        cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
-    private fun takePhoto() {}
-
-    private fun captureVideo() {}
-
-    private fun startCamera() {}
+    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
+        ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+    }
 
     private fun requestPermissions() {
         activityResultLauncher.launch(REQUIRED_PERMISSIONS)
     }
 
+    private fun openAppSettings() {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", packageName, null)
+        }
+        startActivity(intent)
+    }
 
+    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
 
-    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
-        ContextCompat.checkSelfPermission(
-            baseContext, it) == PackageManager.PERMISSION_GRANTED
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
+            }
+
+            imageCapture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .build()
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    this,
+                    cameraSelector,
+                    preview,
+                    imageCapture
+                )
+            } catch (exc: Exception) {
+                Log.e(TAG, "Camera binding failed", exc)
+            }
+
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun takePhoto() {
+        imageCapture.takePicture(
+            cameraExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(imageProxy: ImageProxy) {
+                    recognizeText(imageProxy)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
+                }
+            }
+        )
+    }
+
+    private fun recognizeText(imageProxy: ImageProxy) {
+        val mediaImage = imageProxy.image
+        if (mediaImage != null) {
+            val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+            recognizer.process(image)
+                .addOnSuccessListener { visionText ->
+                    Log.d(TAG, "Recognized text: ${visionText.text}")
+                    runOnUiThread {
+                        viewBinding.textResult.text = visionText.text
+                        Toast.makeText(this, "Text recognized", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "Text recognition failed", e)
+                    Toast.makeText(this, "Recognition failed", Toast.LENGTH_SHORT).show()
+                }
+                .addOnCompleteListener {
+                    imageProxy.close()
+                }
+        } else {
+            imageProxy.close()
+        }
     }
 
     override fun onDestroy() {
@@ -135,16 +178,6 @@ class ScannerActivity : AppCompatActivity() {
     }
 
     companion object {
-        private const val TAG = "CameraXApp"
-        private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
-        private val REQUIRED_PERMISSIONS =
-            mutableListOf (
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO
-            ).apply {
-                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-                    add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                }
-            }.toTypedArray()
+        private const val TAG = "ScannerActivity"
     }
 }
