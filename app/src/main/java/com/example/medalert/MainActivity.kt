@@ -21,6 +21,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var providers: List<AuthUI.IdpConfig>
     private lateinit var signInIntent: Intent
 
+    private val auth = FirebaseAuth.getInstance()
+
+    override fun onStart() {
+        super.onStart()
+        if (auth.currentUser != null) {
+            Log.d("dbfirebase", "User is already signed in : ${auth.currentUser?.displayName}")
+            navigateToPrimaryActivity()
+        } else {
+            Log.d("dbfirebase", "User is not signed in")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -45,6 +57,7 @@ class MainActivity : AppCompatActivity() {
         signInIntent = AuthUI.getInstance()
             .createSignInIntentBuilder()
             .setAvailableProviders(providers)
+            .setTheme(R.style.Theme_MedAlert)
             .build()
         //launches signup/login activity
         findViewById<Button>(R.id.MainLoginB).setOnClickListener {
@@ -64,10 +77,8 @@ class MainActivity : AppCompatActivity() {
             Log.d("dbfirebase", "Sign in successful! User: ${user?.displayName}, UID: ${user?.uid}")
             Toast.makeText(this, "Welcome, ${user?.displayName ?: "User"}!", Toast.LENGTH_SHORT).show()
 
-            // TODO: Navigate to your main app activity here
-            val intent = Intent(this, PrimaryActivity::class.java)
-            startActivity(intent)
-            finish()
+
+            navigateToPrimaryActivity()
 
         } else {
             // Sign in failed.
@@ -79,8 +90,14 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Sign in failed: ${response.error?.message}", Toast.LENGTH_LONG).show()
 
             }
-            // TODO: Handle sign-in failure, perhaps show a detailed message or offer retry options
+
         }
+    }
+
+    private fun navigateToPrimaryActivity() {
+        val intent = Intent(this, PrimaryActivity::class.java)
+        startActivity(intent)
+        finish()
     }
 
 }

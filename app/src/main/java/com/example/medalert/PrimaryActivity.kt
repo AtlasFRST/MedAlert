@@ -36,6 +36,13 @@ class PrimaryActivity : AppCompatActivity() {
             finish()
         }
 
+        findViewById<Button>(R.id.SchedulerB).setOnClickListener {
+            Log.d("activity", "button clicked")
+            val intent = Intent(this, AlarmActivity::class.java)
+            startActivity(intent)
+            finish()
+        }
+
         findViewById<Button>(R.id.LogoutB).setOnClickListener {
             FirebaseAuth.getInstance().signOut()
             val intent = Intent(this, MainActivity::class.java)
