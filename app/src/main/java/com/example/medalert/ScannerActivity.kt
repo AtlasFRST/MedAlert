@@ -155,6 +155,59 @@ class ScannerActivity : AppCompatActivity() {
             recognizer.process(image)
                 .addOnSuccessListener { visionText ->
                     Log.d(TAG, "Recognized text: ${visionText.text}")
+
+                    // Parse the recognized text
+                    val parsed = LabelParser.parse(visionText.text)
+
+                    runOnUiThread {
+                        if (parsed != null) {
+                            val summary = buildString {
+                                appendLine("Patient: ${parsed.patientName ?: "(unknown)"}")
+                                appendLine("Drug: ${parsed.drugName}")
+                                appendLine("Directions: ${parsed.directions}")
+                                parsed.strength?.let { appendLine("Strength: $it") }
+                                parsed.form?.let { appendLine("Form: $it") }
+                                parsed.rxNumber?.let { appendLine("Rx#: $it") }
+                            }
+
+                            viewBinding.textResult.text = summary
+                            Toast.makeText(this, "Parsed label ✔", Toast.LENGTH_SHORT).show()
+
+                            // JSON & Map (for Firestore later)
+                            Log.d(TAG, "Entry JSON:\n${parsed.toJsonString()}")
+                            val map = parsed.toMap()
+
+                            // TODO: when Firebase added
+                            // Firebase.firestore.collection("users")
+                            //     .document(currentUserId)
+                            //     .collection("medications")
+                            //     .add(map)
+
+                            // TODO: DDI check integration
+                            // DdiChecker.check(parsed.drugName)
+                        } else {
+                            viewBinding.textResult.text = visionText.text
+                            Toast.makeText(this, "Couldn’t confidently parse—showing raw text.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "Text recognition failed", e)
+                    Toast.makeText(this, "Recognition failed", Toast.LENGTH_SHORT).show()
+                }
+                .addOnCompleteListener {
+                    imageProxy.close()
+                }
+        } else {
+            imageProxy.close()
+        }
+        /*
+        val mediaImage = imageProxy.image
+        if (mediaImage != null) {
+            val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+            recognizer.process(image)
+                .addOnSuccessListener { visionText ->
+                    Log.d(TAG, "Recognized text: ${visionText.text}")
                     runOnUiThread {
                         viewBinding.textResult.text = visionText.text
                         Toast.makeText(this, "Text recognized", Toast.LENGTH_SHORT).show()
@@ -169,7 +222,7 @@ class ScannerActivity : AppCompatActivity() {
                 }
         } else {
             imageProxy.close()
-        }
+        }*/
     }
 
     override fun onDestroy() {
