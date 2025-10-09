@@ -64,7 +64,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     // Activity and Fragment KTX extensions
     implementation("com.firebaseui:firebase-ui-auth:9.0.0")
-
+    implementation("com.google.mlkit:text-recognition:16.0.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
 
 
 }
