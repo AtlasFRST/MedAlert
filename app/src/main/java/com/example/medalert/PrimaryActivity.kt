@@ -33,14 +33,14 @@ class PrimaryActivity : AppCompatActivity() {
             val intent = Intent(this, ScannerActivity::class.java)
 
             startActivity(intent)
-            finish()
+
         }
 
         findViewById<Button>(R.id.SchedulerB).setOnClickListener {
             Log.d("activity", "button clicked")
             val intent = Intent(this, AlarmActivity::class.java)
             startActivity(intent)
-            finish()
+
         }
 
         findViewById<Button>(R.id.LogoutB).setOnClickListener {

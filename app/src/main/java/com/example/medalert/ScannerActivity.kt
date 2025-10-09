@@ -45,6 +45,7 @@ class ScannerActivity : AppCompatActivity() {
         }
     }.toTypedArray()
 
+
     // Permission launcher
     private val activityResultLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
