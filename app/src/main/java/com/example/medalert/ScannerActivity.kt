@@ -22,6 +22,8 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.io.File
+import java.io.FileWriter
 
 @androidx.annotation.OptIn(ExperimentalGetImage::class)
 class ScannerActivity : AppCompatActivity() {
@@ -177,6 +179,7 @@ class ScannerActivity : AppCompatActivity() {
                             // JSON & Map (for Firestore later)
                             Log.d(TAG, "Entry JSON:\n${parsed.toJsonString()}")
                             val map = parsed.toMap()
+                            saveParsedToCsv(parsed)
 
                             // TODO: when Firebase added
                             // Firebase.firestore.collection("users")
@@ -224,6 +227,39 @@ class ScannerActivity : AppCompatActivity() {
         } else {
             imageProxy.close()
         }*/
+    }
+
+     private fun saveParsedToCsv(parsed: MedicationEntry) {
+        try {
+            // Get or create app-specific CSV file in external storage
+            val file = File(getExternalFilesDir(null), "parsed_labels.csv")
+
+            val isNewFile = !file.exists()
+            FileWriter(file, true).use { writer ->
+                if (isNewFile) {
+                    writer.appendLine("Timestamp,Patient,Drug,Directions,Strength,Form,RxNumber")
+                }
+
+                val timestamp = System.currentTimeMillis()
+                val row = listOf(
+                    timestamp.toString(),
+                    parsed.patientName ?: "",
+                    parsed.drugName ?: "",
+                    parsed.directions ?: "",
+                    parsed.strength ?: "",
+                    parsed.form ?: "",
+                    parsed.rxNumber ?: ""
+                ).joinToString(",")
+
+                writer.appendLine(row)
+            }
+
+            Log.d(TAG, "CSV saved: ${file.absolutePath}")
+            Toast.makeText(this, "Saved to CSV ✔", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving CSV", e)
+            Toast.makeText(this, "Failed to save CSV", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onDestroy() {
