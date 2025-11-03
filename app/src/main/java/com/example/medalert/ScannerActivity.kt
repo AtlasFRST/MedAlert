@@ -10,6 +10,327 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.*
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import com.example.medalert.databinding.ActivityScannerBinding
+import com.example.medalert.data.rxnorm.Candidate
+import com.example.medalert.data.rxnorm.RxNormClient
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileWriter
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+@androidx.annotation.OptIn(ExperimentalGetImage::class)
+class ScannerActivity : AppCompatActivity() {
+
+    private lateinit var viewBinding: ActivityScannerBinding
+    private lateinit var imageCapture: ImageCapture
+    private lateinit var cameraExecutor: ExecutorService
+
+    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
+    // Hold the user-confirmed normalized drug from RxNorm
+    private var confirmedDrugName: String? = null
+    private var confirmedRxcui: String? = null
+
+    // Permissions based on API level
+    private val requiredPermissions = mutableListOf(
+        Manifest.permission.CAMERA
+    ).apply {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            add(Manifest.permission.READ_MEDIA_IMAGES)
+        }
+    }.toTypedArray()
+
+    // Permission launcher
+    private val activityResultLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        var allGranted = true
+        permissions.entries.forEach { (permission, granted) ->
+            if (!granted) {
+                allGranted = false
+                if (!ActivityCompat.shouldShowRequestPermissionRationale(this, permission)) {
+                    Toast.makeText(
+                        this,
+                        "Permission $permission permanently denied. Enable it from app settings.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    openAppSettings()
+                } else {
+                    Toast.makeText(this, "Permission $permission denied.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        if (allGranted) startCamera()
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        viewBinding = ActivityScannerBinding.inflate(layoutInflater)
+        setContentView(viewBinding.root)
+
+        cameraExecutor = Executors.newSingleThreadExecutor()
+        viewBinding.imageCaptureButton.setOnClickListener { takePhoto() }
+
+        if (allPermissionsGranted()) startCamera() else requestPermissions()
+    }
+
+    private fun allPermissionsGranted() =
+        requiredPermissions.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+
+    private fun requestPermissions() {
+        activityResultLauncher.launch(requiredPermissions)
+    }
+
+    private fun openAppSettings() {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", packageName, null)
+        }
+        startActivity(intent)
+    }
+
+    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
+            }
+
+            imageCapture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .build()
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture)
+            } catch (exc: Exception) {
+                Log.e(TAG, "Camera binding failed", exc)
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun takePhoto() {
+        imageCapture.takePicture(
+            cameraExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(imageProxy: ImageProxy) {
+                    recognizeText(imageProxy)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
+                }
+            }
+        )
+    }
+
+    private fun recognizeText(imageProxy: ImageProxy) {
+        val mediaImage = imageProxy.image
+        if (mediaImage == null) {
+            imageProxy.close(); return
+        }
+
+        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+        recognizer.process(image)
+            .addOnSuccessListener { visionText ->
+                Log.d(TAG, "Recognized text: ${visionText.text}")
+
+                val parsed = LabelParser.parse(visionText.text)
+
+                if (parsed != null) {
+                    val rawDrug = parsed.drugName.orEmpty()
+
+                    // launch a coroutine tied to Activity lifecycle
+                    lifecycleScope.launch {
+                        verifyDrugNameWithRxNorm(rawDrug) { chosenName, chosenRxcui ->
+                            confirmedDrugName = chosenName
+                            confirmedRxcui = chosenRxcui
+
+                            val summary = buildString {
+                                appendLine("Patient: ${parsed.patientName ?: "(unknown)"}")
+                                appendLine("Drug (raw): ${parsed.drugName}")
+                                appendLine("Drug (RxNorm): ${confirmedDrugName ?: "(no match)"}")
+                                appendLine("RxCUI: ${confirmedRxcui ?: "(—)"}")
+                                appendLine("Directions: ${parsed.directions}")
+                                parsed.strength?.let { appendLine("Strength: $it") }
+                                parsed.form?.let { appendLine("Form: $it") }
+                                parsed.rxNumber?.let { appendLine("Rx#: $it") }
+                            }
+
+                            runOnUiThread {
+                                viewBinding.textResult.text = summary
+                                Toast.makeText(
+                                    this@ScannerActivity,
+                                    if (confirmedDrugName != null) "Matched via RxNorm ✔" else "No RxNorm match",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+
+                            // Persist (CSV still keeps original columns; add RxNorm if you want)
+                            saveParsedToCsv(parsed)
+                            Log.d(TAG, "Entry JSON:\n${parsed.toJsonString()}")
+                        }
+                    }
+                } else {
+                    runOnUiThread {
+                        viewBinding.textResult.text = visionText.text
+                        Toast.makeText(
+                            this@ScannerActivity,
+                            "Couldn’t confidently parse—showing raw text.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Text recognition failed", e)
+                Toast.makeText(this, "Recognition failed", Toast.LENGTH_SHORT).show()
+            }
+            .addOnCompleteListener {
+                imageProxy.close()
+            }
+    }
+
+    /**
+     * Look up each word in the scanned drugName using RxNorm Approximate Term.
+     * If multiple good matches exist, prompt the user to pick.
+     */
+    private suspend fun verifyDrugNameWithRxNorm(
+        drugName: String,
+        onDone: (standardName: String?, rxcui: String?) -> Unit
+    ) {
+        if (drugName.isBlank()) {
+            onDone(null, null); return
+        }
+
+        val tokens = drugName
+            .split("\\s+".toRegex())
+            .map { it.trim().replace("[^A-Za-z0-9-]".toRegex(), "") }
+            .filter { it.length >= 3 }
+            .take(6)
+
+        if (tokens.isEmpty()) {
+            onDone(null, null); return
+        }
+
+        val candidates = mutableListOf<Candidate>()
+
+        withContext(Dispatchers.IO) {
+            for (t in tokens) {
+                try {
+                    val resp = RxNormClient.api.approximateTerm(t)
+                    candidates += resp.approximateGroup?.candidate.orEmpty()
+                } catch (e: Exception) {
+                    Log.w(TAG, "RxNorm lookup failed for '$t': ${e.message}")
+                }
+            }
+        }
+
+        val merged = candidates
+            .groupBy { (it.rxcui ?: "") + "|" + (it.name ?: "") }
+            .map { (_, group) -> group.maxByOrNull { it.score?.toIntOrNull() ?: -1 }!! }
+            .sortedByDescending { it.score?.toIntOrNull() ?: -1 }
+            .take(20)
+
+        when {
+            merged.isEmpty() -> onDone(null, null)
+            merged.size == 1 -> {
+                val c = merged.first()
+                onDone(c.name, c.rxcui)
+            }
+            else -> {
+                runOnUiThread {
+                    val items = merged.map {
+                        "${it.name ?: "(unknown)"}  [RxCUI: ${it.rxcui ?: "—"} | score ${it.score ?: "?"}]"
+                    }.toTypedArray()
+
+                    AlertDialog.Builder(this@ScannerActivity)
+                        .setTitle("Select the correct medication")
+                        .setItems(items) { dialog, which ->
+                            val chosen = merged[which]
+                            onDone(chosen.name, chosen.rxcui)
+                            dialog.dismiss()
+                        }
+                        .setNegativeButton("Cancel") { dialog, _ ->
+                            onDone(null, null)
+                            dialog.dismiss()
+                        }
+                        .show()
+                }
+            }
+        }
+    }
+
+    private fun saveParsedToCsv(parsed: MedicationEntry) {
+        try {
+            val file = File(getExternalFilesDir(null), "parsed_labels.csv")
+            val isNewFile = !file.exists()
+            FileWriter(file, true).use { writer ->
+                if (isNewFile) {
+                    writer.appendLine("Timestamp,Patient,Drug,Directions,Strength,Form,RxNumber")
+                }
+                val timestamp = System.currentTimeMillis()
+                val row = listOf(
+                    timestamp.toString(),
+                    parsed.patientName ?: "",
+                    parsed.drugName ?: "",
+                    parsed.directions ?: "",
+                    parsed.strength ?: "",
+                    parsed.form ?: "",
+                    parsed.rxNumber ?: ""
+                ).joinToString(",")
+                writer.appendLine(row)
+            }
+            Log.d(TAG, "CSV saved: ${file.absolutePath}")
+            Toast.makeText(this, "Saved to CSV ✔", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving CSV", e)
+            Toast.makeText(this, "Failed to save CSV", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
+    }
+
+    companion object {
+        private const val TAG = "ScannerActivity"
+    }
+}
+
+//OLD SCANNER ACTIVITY
+/*package com.example.medalert
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -24,6 +345,11 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.io.File
 import java.io.FileWriter
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.example.medalert.data.rxnorm.RxNormClient
+import com.example.medalert.data.rxnorm.Candidate
 
 @androidx.annotation.OptIn(ExperimentalGetImage::class)
 class ScannerActivity : AppCompatActivity() {
@@ -162,6 +488,40 @@ class ScannerActivity : AppCompatActivity() {
                     // Parse the recognized text
                     val parsed = LabelParser.parse(visionText.text)
 
+                        if (parsed != null) {
+                            // Kick off RxNorm verification for the scanned drug name
+                            val rawDrug = parsed.drugName.orEmpty()
+                            lifecycleScope.launchWhenStarted {
+                                verifyDrugNameWithRxNorm(rawDrug) { chosenName, chosenRxcui ->
+                                    confirmedDrugName = chosenName
+                                    confirmedRxcui = chosenRxcui
+
+                                    val summary = buildString {
+                                        appendLine("Patient: ${parsed.patientName ?: "(unknown)"}")
+                                        appendLine("Drug (raw): ${parsed.drugName}")
+                                        appendLine("Drug (RxNorm): ${confirmedDrugName ?: "(no match)"}")
+                                        appendLine("RxCUI: ${confirmedRxcui ?: "(—)"}")
+                                        appendLine("Directions: ${parsed.directions}")
+                                        parsed.strength?.let { appendLine("Strength: $it") }
+                                        parsed.form?.let { appendLine("Form: $it") }
+                                        parsed.rxNumber?.let { appendLine("Rx#: $it") }
+                                    }
+
+                                    runOnUiThread {
+                                        viewBinding.textResult.text = summary
+                                        Toast.makeText(
+                                            this@ScannerActivity,
+                                            if (confirmedDrugName != null) "Matched via RxNorm ✔" else "No RxNorm match",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+
+                                    // Persist as needed
+                                    saveParsedToCsv(parsed) // keeps original fields; update if you want RxNorm too
+                                    Log.d(TAG, "Entry JSON:\n${parsed.toJsonString()}")
+                                }
+                            }
+                        }
                     runOnUiThread {
                         if (parsed != null) {
                             val summary = buildString {
@@ -189,7 +549,9 @@ class ScannerActivity : AppCompatActivity() {
 
                             // TODO: DDI check integration
                             // DdiChecker.check(parsed.drugName)
-                        } else {
+                        }
+
+                        else {
                             viewBinding.textResult.text = visionText.text
                             Toast.makeText(this, "Couldn’t confidently parse—showing raw text.", Toast.LENGTH_SHORT).show()
                         }
@@ -205,6 +567,7 @@ class ScannerActivity : AppCompatActivity() {
         } else {
             imageProxy.close()
         }
+
         /*
         val mediaImage = imageProxy.image
         if (mediaImage != null) {
@@ -228,7 +591,77 @@ class ScannerActivity : AppCompatActivity() {
             imageProxy.close()
         }*/
     }
+    private suspend fun verifyDrugNameWithRxNorm(
+        drugName: String,
+        onDone: (standardName: String?, rxcui: String?) -> Unit
+    ) {
+        if (drugName.isBlank()) {
+            onDone(null, null); return
+        }
 
+        // Tokenize and filter short/noisy fragments
+        val tokens = drugName
+            .split("\\s+".toRegex())
+            .map { it.trim().replace("[^A-Za-z0-9-]".toRegex(), "") }
+            .filter { it.length >= 3 }
+            .take(6) // safety bound
+
+        if (tokens.isEmpty()) {
+            onDone(null, null); return
+        }
+
+        val candidates = mutableListOf<Candidate>()
+
+        // Fetch candidates for each word on IO
+        withContext(Dispatchers.IO) {
+            for (t in tokens) {
+                try {
+                    val resp = RxNormClient.api.approximateTerm(t)
+                    val list = resp.approximateGroup?.candidate.orEmpty()
+                    candidates += list
+                } catch (e: Exception) {
+                    Log.w(TAG, "RxNorm lookup failed for '$t': ${e.message}")
+                }
+            }
+        }
+
+        // Merge: de-dup by RXCUI or name; prefer higher score
+        val merged = candidates
+            .groupBy { (it.rxcui ?: "") + "|" + (it.name ?: "") }
+            .map { (_, group) -> group.maxByOrNull { it.score?.toIntOrNull() ?: -1 }!! }
+            .sortedByDescending { it.score?.toIntOrNull() ?: -1 }
+            .take(20)
+
+        when {
+            merged.isEmpty() -> onDone(null, null)
+
+            merged.size == 1 -> {
+                val c = merged.first()
+                onDone(c.name, c.rxcui)
+            }
+
+            else -> {
+                // Let user pick the correct normalized name
+                runOnUiThread {
+                    val items = merged.map { "${it.name ?: "(unknown)"}  [RxCUI: ${it.rxcui ?: "—"} | score ${it.score ?: "?"}]" }
+                        .toTypedArray()
+
+                    AlertDialog.Builder(this)
+                        .setTitle("Select the correct medication")
+                        .setItems(items) { dialog, which ->
+                            val chosen = merged[which]
+                            onDone(chosen.name, chosen.rxcui)
+                            dialog.dismiss()
+                        }
+                        .setNegativeButton("Cancel") { dialog, _ ->
+                            onDone(null, null)
+                            dialog.dismiss()
+                        }
+                        .show()
+                }
+            }
+        }
+    }
      private fun saveParsedToCsv(parsed: MedicationEntry) {
         try {
             // Get or create app-specific CSV file in external storage
@@ -271,3 +704,4 @@ class ScannerActivity : AppCompatActivity() {
         private const val TAG = "ScannerActivity"
     }
 }
+*/
