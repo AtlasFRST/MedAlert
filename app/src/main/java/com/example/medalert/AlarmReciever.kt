@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.google.firebase.auth.FirebaseAuth
 
 
 class AlarmReceiver : BroadcastReceiver() {
@@ -16,7 +17,12 @@ class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         // This method is called when the alarm fires.
         val time = intent.getStringExtra("ALARM_TIME") ?: "your medication"
+        val requestCode = intent.getIntExtra("REQUEST_CODE", 0)
         Log.d("AlarmReceiver", "ALARM TRIGGERED for time: $time")
+
+        val userId = FirebaseAuth.getInstance().currentUser?.uid
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
 
         val contentIntent = Intent(context, AlarmActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -31,7 +37,6 @@ class AlarmReceiver : BroadcastReceiver() {
 
 
         // Create and show a notification
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channelId = "alarm_channel"
 
         // Create a notification channel for Android 8.0 (API 26) and higher
@@ -44,16 +49,29 @@ class AlarmReceiver : BroadcastReceiver() {
             notificationManager.createNotificationChannel(channel)
         }
 
-        val notification = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_launcher_foreground) // Replace with your own icon
+        val actionIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+            putExtra("USER_ID", userId)
+            putExtra("REQUEST_CODE", requestCode)
+        }
+
+        val actionPendingIntent = PendingIntent.getBroadcast(
+            context,
+            requestCode, // Must be a unique code for the PendingIntent as well
+            actionIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notification = NotificationCompat.Builder(context, channelId) // Use the correct channelId
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("Medication Reminder")
-            .setContentText("It's time for your medication scheduled at $time!")
+            .setContentText("It's time to take your medication ($time).") // Corrected variable
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent) // Set the intent to open the app on tap
             .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
+            .addAction(R.drawable.ic_check_mark, "Mark as Taken", actionPendingIntent)
             .build()
 
-        // The ID should be unique for each notification if you want to show multiple
-        notificationManager.notify(1, notification)
+
+        notificationManager.notify(requestCode, notification)
     }
 }

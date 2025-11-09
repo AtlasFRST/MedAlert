@@ -57,6 +57,9 @@
             android:name=".AlarmReceiver"
             android:enabled="true"
             android:exported="false" />
+        <receiver
+            android:name=".NotificationActionReceiver"
+            android:enabled="true" />
     </application>
 
 </manifest>
