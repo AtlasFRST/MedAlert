@@ -1,40 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    xmlns:tools="http://schemas.android.com/tools"
     android:orientation="vertical"
     android:padding="16dp"
-    android:layout_marginBottom="8dp"
-    android:background="@drawable/item_alarm_background"> <!-- Optional: create a background drawable for style -->
+    android:layout_margin="8dp"
+    android:background="@drawable/item_alarm_background">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
         <TextView
             android:id="@+id/tvAlarmTime"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="08:30 AM"
-            android:textSize="24sp"
-            android:textStyle="bold" />
+            android:textSize="28sp"
+            android:textStyle="bold"
+            tools:text="8:00 AM" />
 
         <Button
-            android:id="@+id/btnDeleteAlarm"
-            style="?android:attr/borderlessButtonStyle"
+            android:id="@+id/deleteAlarmButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Delete"
-            android:textColor="@android:color/holo_red_light" />
+            style="?android:attr/borderlessButtonStyle"
+            android:textColor="@android:color/holo_red_dark" />
+
     </LinearLayout>
 
+
     <TextView
-        android:id="@+id/tvMedications"
+        android:id="@+id/tvMedicationNames"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="• Lisinopril (25 left)\n• Metformin (55 left)"
-        android:textSize="16sp" />
+        android:textSize="16sp"
+        android:textStyle="italic"
+        tools:text="Metformin, Lisinopril" />
+
+
+    <TextView
+        android:id="@+id/tvPillsRemaining"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textSize="14sp"
+        tools:text="Metformin: 88 pills left\nLisinopril: 29 pills left" />
+
 </LinearLayout>

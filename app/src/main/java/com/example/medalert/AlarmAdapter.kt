@@ -7,38 +7,48 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.medalert.models.Alarm
+import com.example.medalert.models.Medication
 
+// The adapter now needs both the list of alarms and the master list of all medications
 class AlarmAdapter(
-    private val alarms: MutableList<Alarm>, // Use the Alarm model
+    private val alarms: List<Alarm>,
+    private val allMedications: List<Medication>,
     private val onDeleteClick: (Alarm) -> Unit
 ) : RecyclerView.Adapter<AlarmAdapter.AlarmViewHolder>() {
 
     class AlarmViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val alarmTime: TextView = view.findViewById(R.id.tvAlarmTime)
-        val medications: TextView = view.findViewById(R.id.tvMedications)
-        val deleteButton: Button = view.findViewById(R.id.btnDeleteAlarm)
+        val tvAlarmTime: TextView = view.findViewById(R.id.tvAlarmTime)
+        val tvMedicationNames: TextView = view.findViewById(R.id.tvMedicationNames)
+        val tvPillsRemaining: TextView = view.findViewById(R.id.tvPillsRemaining)
+        val deleteButton: Button = view.findViewById(R.id.deleteAlarmButton)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): AlarmViewHolder {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_alarm, parent, false)
+        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_alarm, parent, false)
         return AlarmViewHolder(view)
     }
 
     override fun onBindViewHolder(holder: AlarmViewHolder, position: Int) {
         val alarm = alarms[position]
-        holder.alarmTime.text = alarm.alarmTime
+        holder.tvAlarmTime.text = alarm.alarmTime
 
-        // Build the medication list string
-        val medText = alarm.medications.joinToString("\n") { med ->
-            "• ${med.name} (${med.pillsRemaining} left)"
+        // Join the names of the medications for this alarm
+        holder.tvMedicationNames.text = alarm.medicationNames.joinToString(", ")
+
+        // --- NEW LOOKUP LOGIC ---
+        // Find the full Medication objects that correspond to the names in this alarm
+        val medsInThisAlarm = allMedications.filter { it.name in alarm.medicationNames }
+
+        // Display the pills remaining for each medication
+        val pillsRemainingText = medsInThisAlarm.joinToString("\n") {
+            "${it.name}: ${it.pillsRemaining} pills left"
         }
-        holder.medications.text = medText
+        holder.tvPillsRemaining.text = pillsRemainingText
 
         holder.deleteButton.setOnClickListener {
             onDeleteClick(alarm)
         }
     }
 
-    override fun getItemCount() = alarms.size
+    override fun getItemCount(): Int = alarms.size
 }

@@ -6,7 +6,6 @@ import android.content.Intent
 import android.util.Log
 import com.example.medalert.models.TakenRecord
 import com.example.medalert.models.UserProfile
-import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.toObject
@@ -18,49 +17,47 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val alarmRequestCode = intent.getIntExtra("REQUEST_CODE", -1)
 
         if (userId == null || alarmRequestCode == -1) {
-            Log.e("ActionReceiver", "User ID or Request Code missing in intent.")
+            Log.e("ActionReceiver", "User ID or Request Code missing.")
             return
         }
-
-        Log.d("ActionReceiver", "Received 'Mark as Taken' for user $userId and alarm $alarmRequestCode")
 
         val db = FirebaseFirestore.getInstance()
         val userDocRef = db.collection("users").document(userId)
 
         db.runTransaction { transaction ->
             val snapshot = transaction.get(userDocRef)
-            val userProfile = snapshot.toObject<UserProfile>()
-            if (userProfile == null) {
-                Log.e("ActionReceiver", "User profile not found for ID: $userId")
+            val userProfile = snapshot.toObject<UserProfile>() ?: return@runTransaction
+
+            // 1. Find the alarm that was triggered.
+            val triggeredAlarm = userProfile.alarms.find { it.requestCode == alarmRequestCode }
+            if (triggeredAlarm == null) {
+                Log.w("ActionReceiver", "Triggered alarm with code $alarmRequestCode not found.")
                 return@runTransaction
             }
 
-            val existingAlarms = userProfile.alarms.toMutableList()
-            val alarmIndex = existingAlarms.indexOfFirst { it.requestCode == alarmRequestCode }
+            // 2. Get the names of the medications for that alarm.
+            val medNamesToUpdate = triggeredAlarm.medicationNames
 
-            if (alarmIndex != -1) {
-                val alarmToUpdate = existingAlarms[alarmIndex]
-                val updatedMedications = alarmToUpdate.medications.map { med ->
-                    // Decrement pills and add to history
+            // 3. Update each of those medications in the master list.
+            val updatedMasterMeds = userProfile.medications.map { med ->
+                if (med.name in medNamesToUpdate) {
+                    // This is one of the meds we need to update
                     med.copy(
                         pillsRemaining = if (med.pillsRemaining > 0) med.pillsRemaining - 1 else 0,
                         takenHistory = med.takenHistory + TakenRecord() // Add new timestamp
                     )
+                } else {
+                    med // This medication was not in the alarm, return it unchanged.
                 }
-
-                // Update the alarm with the modified medications list
-                existingAlarms[alarmIndex] = alarmToUpdate.copy(medications = updatedMedications)
-                transaction.set(userDocRef, mapOf("alarms" to existingAlarms), SetOptions.merge())
-            } else {
-                Log.w("ActionReceiver", "Alarm with request code $alarmRequestCode not found.")
             }
-            null
+
+            // 4. Save the updated master medications list back to Firestore.
+            transaction.set(userDocRef, mapOf("medications" to updatedMasterMeds), SetOptions.merge())
+
         }.addOnSuccessListener {
             Log.d("ActionReceiver", "Successfully marked as taken and updated pills remaining.")
-            // Optionally, dismiss the notification
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             notificationManager.cancel(alarmRequestCode)
-
         }.addOnFailureListener { e ->
             Log.e("ActionReceiver", "Failed to mark as taken.", e)
         }

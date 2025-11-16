@@ -1,6 +1,5 @@
 package com.example.medalert
 
-// Required imports for models, Firestore, and dialogs
 import android.app.AlarmManager
 import com.example.medalert.models.Alarm
 import com.example.medalert.models.Medication
@@ -16,21 +15,20 @@ import android.content.Intent
 import android.icu.util.Calendar
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import android.provider.Settings
-import android.widget.LinearLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.SetOptions
 import java.text.SimpleDateFormat
 import java.util.Locale
-
 
 class AlarmActivity : AppCompatActivity() {
 
@@ -38,9 +36,11 @@ class AlarmActivity : AppCompatActivity() {
     private lateinit var rvAlarms: RecyclerView
     private lateinit var tvNoAlarms: TextView
     private lateinit var alarmAdapter: AlarmAdapter
-    private val alarmsList = mutableListOf<Alarm>() // List of Alarm objects
 
-    // Firestore and Auth instances
+    // We now need to hold both lists locally to reconstruct the display
+    private val masterMedicationList = mutableListOf<Medication>()
+    private val alarmsList = mutableListOf<Alarm>()
+
     private val db = FirebaseFirestore.getInstance()
     private val userId = FirebaseAuth.getInstance().currentUser?.uid
 
@@ -48,33 +48,68 @@ class AlarmActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_alarm)
 
-
         alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         rvAlarms = findViewById(R.id.rvAlarms)
         tvNoAlarms = findViewById(R.id.tvNoAlarms)
 
         setupRecyclerView()
 
-
         findViewById<Button>(R.id.SetAlarmB).setOnClickListener {
             showAddAlarmDialog()
         }
 
-        // Load existing alarms from Firestore. This "scans the document".
         loadAlarmsFromFirestore()
     }
 
     private fun setupRecyclerView() {
-        alarmAdapter = AlarmAdapter(alarmsList) { alarm: Alarm ->
+        // The adapter now needs both lists to link medication details to alarm names
+        alarmAdapter = AlarmAdapter(alarmsList, masterMedicationList) { alarm ->
             deleteAlarm(alarm)
         }
         rvAlarms.adapter = alarmAdapter
         rvAlarms.layoutManager = LinearLayoutManager(this)
     }
 
+    // --- DATA LOADING & UI ---
+
+    private fun loadAlarmsFromFirestore() {
+        if (userId == null) return
+
+        db.collection("users").document(userId)
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    Log.w("AlarmActivity", "Listen failed.", e)
+                    return@addSnapshotListener
+                }
+
+                val userProfile = snapshot?.toObject<UserProfile>()
+                val alarms = userProfile?.alarms ?: emptyList()
+                val medications = userProfile?.medications ?: emptyList()
+
+                // Update both master lists
+                masterMedicationList.clear()
+                masterMedicationList.addAll(medications)
+
+                updateUiWithAlarms(alarms)
+
+                // Schedule all device alarms
+                alarms.forEach { setAndroidAlarm(it) }
+            }
+    }
+
+    private fun updateUiWithAlarms(alarms: List<Alarm>) {
+        alarmsList.clear()
+        // Here, we pass the full medication list to the adapter so it can find details
+        alarmsList.addAll(alarms.sortedBy { it.alarmTime })
+        alarmAdapter.notifyDataSetChanged() // The adapter will now have both new lists
+
+        tvNoAlarms.visibility = if (alarmsList.isEmpty()) View.VISIBLE else View.GONE
+        rvAlarms.visibility = if (alarmsList.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    // --- ADD MEDICATION FLOW (REFACTORED) ---
 
     private fun showAddAlarmDialog() {
-        // This part remains the same
         val medNameInput = EditText(this).apply { hint = "Medication Name" }
         val pillsRemainingInput = EditText(this).apply { hint = "Pills Remaining"; inputType = android.text.InputType.TYPE_CLASS_NUMBER }
         val timesPerDayInput = EditText(this).apply { hint = "Times Per Day"; inputType = android.text.InputType.TYPE_CLASS_NUMBER }
@@ -100,55 +135,81 @@ class AlarmActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
 
+                // Important: Check if this medication already exists in our master list.
+                // For this normalized structure, we treat adding a medication and setting its alarms as distinct steps.
+                if (masterMedicationList.any { it.name.equals(medName, ignoreCase = true) }) {
+                    Toast.makeText(this, "'$medName' already exists. To change its schedule, please delete it and add it again.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+
                 val newMed = Medication(medName, pillsRemaining, timesPerDay)
 
-                // --- NEW LOGIC TO FIND AND PROMPT FOR MATCHING SCHEDULES ---
                 checkForMatchingSchedules(newMed) { userWantsToCreateNew ->
                     if (userWantsToCreateNew) {
-                        // User either said "No" or no matches were found.
-                        // Proceed with the original flow of asking for each time.
-                        askForAlarmTime(newMed, 1, newMed.timesPerDay) { medAlarms ->
-                            if (medAlarms.isNotEmpty()) {
-                                saveAllMedicationAlarms(medAlarms)
+                        askForAlarmTime(newMed, 1, newMed.timesPerDay) { alarmTimes ->
+                            if (alarmTimes.isNotEmpty()) {
+                                // This function now saves the medication to the master list AND creates the new alarms
+                                saveNewMedicationAndAlarms(newMed, alarmTimes)
                             }
                         }
                     }
-                    // If the user said "Yes", the new medication is already saved
-                    // by the `checkForMatchingSchedules` function, so we do nothing here.
                 }
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    // In AlarmActivity.kt, add this new function
+    private fun askForAlarmTime(medication: Medication, currentAlarmNum: Int, totalAlarms: Int, onComplete: (List<String>) -> Unit) {
+        if (currentAlarmNum > totalAlarms) {
+            onComplete(emptyList()) // Base case
+            return
+        }
 
-    /**
-     * Checks if there are existing alarm schedules that match the 'timesPerDay'
-     * of the new medication. If so, it prompts the user to join one of them.
-     * @param onComplete A callback that returns 'true' if a new schedule should be created,
-     *                   or 'false' if the medication was added to an existing schedule.
-     */
+        val timeInput = EditText(this).apply { hint = "e.g., 8:30 AM" }
+        val dialogView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(50, 50, 50, 50); addView(timeInput)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Set Time for Alarm $currentAlarmNum of $totalAlarms")
+            .setView(dialogView)
+            .setCancelable(false)
+            .setPositiveButton("Set Time") { _, _ ->
+                val alarmTime = timeInput.text.toString()
+                if (alarmTime.isNotBlank()) {
+                    askForAlarmTime(medication, currentAlarmNum + 1, totalAlarms) { remainingAlarms ->
+                        val allAlarms = mutableListOf(alarmTime)
+                        allAlarms.addAll(remainingAlarms)
+                        onComplete(allAlarms)
+                    }
+                } else {
+                    Toast.makeText(this, "Please enter a valid time", Toast.LENGTH_SHORT).show()
+                    askForAlarmTime(medication, currentAlarmNum, totalAlarms, onComplete)
+                }
+            }
+            .show()
+    }
+
+    // --- "JOIN SCHEDULE" FLOW (REFACTORED) ---
+
     private fun checkForMatchingSchedules(newMed: Medication, onComplete: (Boolean) -> Unit) {
         if (userId == null) {
-            onComplete(true) // No user, proceed to create new
+            onComplete(true)
             return
         }
 
-        // 1. Find all medications that have the same 'timesPerDay' value
-        val matchingSchedules = alarmsList
-            .flatMap { it.medications } // Get a flat list of all medications
-            .filter { it.timesPerDay == newMed.timesPerDay } // Filter by timesPerDay
-            .map { it.name } // Get their names
-            .distinct() // Get unique medication names
+        // Find existing medications with the same timesPerDay
+        val matchingMeds = masterMedicationList
+            .filter { it.timesPerDay == newMed.timesPerDay }
+            .map { it.name }
+            .distinct()
 
-        if (matchingSchedules.isEmpty()) {
-            onComplete(true) // No matches found, proceed to create a new schedule
+        if (matchingMeds.isEmpty()) {
+            onComplete(true) // No matches, create a new schedule
             return
         }
 
-        // 2. A match is found! Prompt the user.
-        val scheduleNames = matchingSchedules.joinToString(", ")
+        val scheduleNames = matchingMeds.joinToString(", ")
         val message = "This medication is taken ${newMed.timesPerDay} time(s) per day, " +
                 "just like '$scheduleNames'.\n\nWould you like to add it to the same schedule?"
 
@@ -156,17 +217,14 @@ class AlarmActivity : AppCompatActivity() {
             .setTitle("Join Existing Schedule?")
             .setMessage(message)
             .setPositiveButton("Yes, Join Schedule") { _, _ ->
-                // User said YES. Add the new medication to the existing alarms.
                 addMedicationToExistingSchedule(newMed)
                 onComplete(false) // Don't create a new schedule
             }
             .setNegativeButton("No, Create New Schedule") { _, _ ->
-                onComplete(true) // User said NO. Proceed to create a new schedule.
+                onComplete(true) // Proceed to create a new schedule
             }
             .show()
     }
-
-    // In AlarmActivity.kt, add this new helper function
 
     private fun addMedicationToExistingSchedule(newMed: Medication) {
         if (userId == null) return
@@ -176,187 +234,165 @@ class AlarmActivity : AppCompatActivity() {
         db.runTransaction { transaction ->
             val snapshot = transaction.get(userDocRef)
             val userProfile = snapshot.toObject<UserProfile>() ?: UserProfile()
-            val existingAlarms = userProfile.alarms.toMutableList()
 
-            // Find all alarms that contain a medication with the matching 'timesPerDay'
+            // First, add the new medication to the master list
+            val updatedMasterMeds = userProfile.medications.toMutableList().apply { add(newMed) }
+
+            val existingAlarms = userProfile.alarms.toMutableList()
+            // Find the names of meds with the same frequency
+            val matchingMedNames = userProfile.medications
+                .filter { it.timesPerDay == newMed.timesPerDay }
+                .map { it.name }
+
+            // Find all alarms that contain any of those medications
             val alarmsToUpdate = existingAlarms.filter { alarm ->
-                alarm.medications.any { med -> med.timesPerDay == newMed.timesPerDay }
+                alarm.medicationNames.any { medName -> medName in matchingMedNames }
             }
 
             for (alarmToUpdate in alarmsToUpdate) {
                 val alarmIndex = existingAlarms.indexOfFirst { it.requestCode == alarmToUpdate.requestCode }
                 if (alarmIndex != -1) {
-                    val updatedMeds = alarmToUpdate.medications.toMutableList().apply { add(newMed) }
-                    existingAlarms[alarmIndex] = alarmToUpdate.copy(medications = updatedMeds)
+                    val updatedMedNames = alarmToUpdate.medicationNames.toMutableList().apply { add(newMed.name) }
+                    existingAlarms[alarmIndex] = alarmToUpdate.copy(medicationNames = updatedMedNames)
                 }
             }
 
-            transaction.set(userDocRef, mapOf("alarms" to existingAlarms), SetOptions.merge())
+            // Save both updated lists to Firestore
+            transaction.set(userDocRef, mapOf(
+                "medications" to updatedMasterMeds,
+                "alarms" to existingAlarms
+            ), SetOptions.merge())
             null
         }.addOnSuccessListener {
             Toast.makeText(this, "'${newMed.name}' was added to the existing schedule.", Toast.LENGTH_LONG).show()
+            // A reload will refresh UI and set alarms correctly
+            loadAlarmsFromFirestore()
         }.addOnFailureListener { e ->
             Toast.makeText(this, "Failed to update schedule: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
+    // --- DATA SAVING (REFACTORED) ---
 
-
-    // --- NEW: A recursive function to ask for each alarm time ---
-    private fun askForAlarmTime(medication: Medication, currentAlarmNum: Int, totalAlarms: Int, onComplete: (List<Pair<Medication, String>>) -> Unit) {
-        if (currentAlarmNum > totalAlarms) {
-            // Base case: We've collected all alarm times.
-            // The 'onComplete' lambda will now be called with an empty list,
-            // signaling the end. The real data is collected in the 'else' block.
-            onComplete(emptyList())
-            return
-        }
-
-        val timeInput = EditText(this).apply { hint = "e.g., 8:30 AM" }
-        val dialogView = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(50, 50, 50, 50)
-            addView(timeInput)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Set Time for Alarm $currentAlarmNum of $totalAlarms")
-            .setView(dialogView)
-            .setCancelable(false) // Prevent user from dismissing
-            .setPositiveButton("Set Time") { _, _ ->
-                val alarmTime = timeInput.text.toString()
-                if (alarmTime.isNotBlank()) {
-                    // We have the time for the current alarm, now ask for the next one
-                    askForAlarmTime(medication, currentAlarmNum + 1, totalAlarms) { remainingAlarms ->
-                        // This builds the list of alarms backwards as the recursion unwinds
-                        val allAlarms = mutableListOf(Pair(medication, alarmTime))
-                        allAlarms.addAll(remainingAlarms)
-                        onComplete(allAlarms)
-                    }
-                } else {
-                    Toast.makeText(this, "Please enter a valid time", Toast.LENGTH_SHORT).show()
-                    // Ask for the same alarm time again
-                    askForAlarmTime(medication, currentAlarmNum, totalAlarms, onComplete)
-                }
-            }
-            .show()
-    }
-
-
-    // In AlarmActivity.kt
-// REPLACE your old saveMedicationAlarm function with this new one.
-
-    private fun saveAllMedicationAlarms(medAlarms: List<Pair<Medication, String>>) {
-        if (userId == null || medAlarms.isEmpty()) return
+    private fun saveNewMedicationAndAlarms(medication: Medication, alarmTimes: List<String>) {
+        if (userId == null) return
 
         val userDocRef = db.collection("users").document(userId)
 
         db.runTransaction { transaction ->
             val snapshot = transaction.get(userDocRef)
             val userProfile = snapshot.toObject<UserProfile>() ?: UserProfile()
+
+            // 1. Add the new medication to the master medication list
+            val updatedMasterMeds = userProfile.medications.toMutableList().apply { add(medication) }
+
+            // 2. Create new alarms or add to existing ones
             val existingAlarms = userProfile.alarms.toMutableList()
-
-            // Loop through each medication and time the user entered
-            for ((medication, alarmTime) in medAlarms) {
-                // Check if an alarm for this specific time already exists
-                val alarmIndex = existingAlarms.indexOfFirst { it.alarmTime == alarmTime }
-
+            for (time in alarmTimes) {
+                val alarmIndex = existingAlarms.indexOfFirst { it.alarmTime == time }
                 if (alarmIndex != -1) {
-                    // Alarm exists, add medication to it (avoiding duplicates)
-                    val existingAlarm = existingAlarms[alarmIndex]
-                    if (!existingAlarm.medications.any { it.name == medication.name }) {
-                        val updatedMeds = existingAlarm.medications.toMutableList().apply { add(medication) }
-                        existingAlarms[alarmIndex] = existingAlarm.copy(medications = updatedMeds)
-                    }
+                    // An alarm for this time already exists, just add the medication name
+                    val alarmToUpdate = existingAlarms[alarmIndex]
+                    val updatedNames = alarmToUpdate.medicationNames.toMutableList().apply { add(medication.name) }
+                    existingAlarms[alarmIndex] = alarmToUpdate.copy(medicationNames = updatedNames)
                 } else {
-                    // No alarm for this time, create a new one
+                    // No alarm for this time, create a brand new one
                     val newAlarm = Alarm(
-                        alarmTime = alarmTime,
-                        requestCode = (System.currentTimeMillis() + alarmTime.hashCode()).toInt(), // Unique code
-                        medications = listOf(medication)
+                        alarmTime = time,
+                        requestCode = (System.currentTimeMillis() + time.hashCode()).toInt(),
+                        medicationNames = listOf(medication.name)
                     )
                     existingAlarms.add(newAlarm)
                 }
             }
 
-            // Set the final updated list back to Firestore
-            transaction.set(userDocRef, mapOf("alarms" to existingAlarms), SetOptions.merge())
-            null // Return null for success
+            // 3. Save both updated lists back to Firestore
+            transaction.set(userDocRef, mapOf(
+                "medications" to updatedMasterMeds,
+                "alarms" to existingAlarms
+            ), SetOptions.merge())
+
         }.addOnSuccessListener {
-            Log.d("AlarmActivity", "Transaction success! All user-defined alarms have been saved.")
+            Log.d("AlarmActivity", "Transaction success! New medication and alarms saved.")
             Toast.makeText(this, "Medication alarms saved successfully!", Toast.LENGTH_SHORT).show()
+            loadAlarmsFromFirestore() // Reload to update UI and set device alarms
         }.addOnFailureListener { e ->
             Log.w("AlarmActivity", "Transaction failure.", e)
             Toast.makeText(this, "Failed to save alarms: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
-
+    // --- DELETE ALARM (REFACTORED) ---
 
     private fun deleteAlarm(alarmToDelete: Alarm) {
         if (userId == null) return
 
-        // Also cancel the Android AlarmManager alarm
-        cancelAndroidAlarm(alarmToDelete.requestCode)
+        // This function becomes much more complex now.
+        // For simplicity, a full medication is deleted from all alarms it appears in.
+        // A more advanced implementation might ask the user if they want to remove just from this alarm.
 
-        // Use FieldValue.arrayRemove to delete the object from the Firestore array
-        val userDocRef = db.collection("users").document(userId)
-        userDocRef.update("alarms", FieldValue.arrayRemove(alarmToDelete))
-            .addOnSuccessListener { Log.d("AlarmActivity", "Alarm document successfully deleted!") }
-            .addOnFailureListener { e -> Log.w("AlarmActivity", "Error deleting document", e) }
-    }
+        // Let's assume we delete the ENTIRE medication schedule for simplicity
+        val medsInThisAlarm = alarmToDelete.medicationNames
 
-    // This function "scans" the user's document for alarms
-    private fun loadAlarmsFromFirestore() {
-        if (userId == null) return
-
-        db.collection("users").document(userId)
-            .addSnapshotListener { snapshot, e ->
-                if (e != null) {
-                    Log.w("AlarmActivity", "Listen failed.", e)
-                    return@addSnapshotListener
-                }
-
-                val userProfile = snapshot?.toObject<UserProfile>()
-                val alarms = userProfile?.alarms ?: emptyList()
-
-                updateUiWithAlarms(alarms)
-
-                // Set the actual Android alarms
-                alarms.forEach { setAndroidAlarm(it) }
+        AlertDialog.Builder(this)
+            .setTitle("Delete Medication Schedule?")
+            .setMessage("This will delete '${medsInThisAlarm.joinToString()}' and all of its associated alarms. Are you sure?")
+            .setPositiveButton("Yes, Delete") { _, _ ->
+                performDelete(medsInThisAlarm)
             }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
-    private fun updateUiWithAlarms(alarms: List<Alarm>) {
-        alarmsList.clear()
-        alarmsList.addAll(alarms.sortedBy { it.alarmTime })
-        alarmAdapter.notifyDataSetChanged()
+    private fun performDelete(medNamesToDelete: List<String>) {
+        if (userId == null) return
+        val userDocRef = db.collection("users").document(userId)
 
-        tvNoAlarms.visibility = if (alarmsList.isEmpty()) View.VISIBLE else View.GONE
-        rvAlarms.visibility = if (alarmsList.isEmpty()) View.GONE else View.VISIBLE
+        db.runTransaction { transaction ->
+            val snapshot = transaction.get(userDocRef)
+            val userProfile = snapshot.toObject<UserProfile>() ?: return@runTransaction
+
+            // 1. Remove the medications from the master list
+            val updatedMasterMeds = userProfile.medications.filter { it.name !in medNamesToDelete }
+
+            // 2. Remove the medication names from all alarms, and delete alarms that become empty
+            val updatedAlarms = userProfile.alarms.mapNotNull { alarm ->
+                // Cancel the Android alarm before deleting
+                cancelAndroidAlarm(alarm.requestCode)
+
+                val remainingMeds = alarm.medicationNames.filter { it !in medNamesToDelete }
+                if (remainingMeds.isEmpty()) {
+                    null // This alarm is now empty, so delete it by returning null
+                } else {
+                    alarm.copy(medicationNames = remainingMeds) // Keep the alarm with the remaining meds
+                }
+            }
+
+            transaction.set(userDocRef, mapOf(
+                "medications" to updatedMasterMeds,
+                "alarms" to updatedAlarms
+            ), SetOptions.merge())
+
+        }.addOnSuccessListener {
+            Log.d("AlarmActivity", "Medication schedule deleted successfully.")
+            loadAlarmsFromFirestore() // Reload everything
+        }.addOnFailureListener { e ->
+            Log.w("AlarmActivity", "Error deleting medication schedule", e)
+        }
     }
+
+
+    // --- ANDROID ALARM SCHEDULING (NO CHANGES NEEDED HERE) ---
 
     private fun checkPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (!alarmManager.canScheduleExactAlarms()) {
-                // Permission is not granted, request it from the user.
-                Toast.makeText(
-                    this,
-                    "Permission required to set exact alarms",
-                    Toast.LENGTH_LONG
-                ).show()
-                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).also {
-                    startActivity(it)
-                }
-                false // Return false because we don't have permission yet
-            } else {
-                true // Permission is already granted
-            }
-        } else {
-            true // No special permission needed for older Android versions
-        }
+                Toast.makeText(this, "Permission required to set exact alarms", Toast.LENGTH_LONG).show()
+                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).also { startActivity(it) }
+                false
+            } else { true }
+        } else { true }
     }
-
 
     private fun setAndroidAlarm(alarm: Alarm) {
         if (checkPermission()) {
@@ -364,59 +400,45 @@ class AlarmActivity : AppCompatActivity() {
             val calendar = Calendar.getInstance()
 
             try {
-                // Parse the time string (e.g., "8:30 AM") into a Date object
                 val date = alarmTimeFormat.parse(alarm.alarmTime)
                 if (date != null) {
-                    val alarmCalendar = Calendar.getInstance()
-                    alarmCalendar.time = date
-
-                    // Set the calendar to today's date but with the alarm's time
+                    val alarmCalendar = Calendar.getInstance().apply { time = date }
                     calendar.set(Calendar.HOUR_OF_DAY, alarmCalendar.get(Calendar.HOUR_OF_DAY))
                     calendar.set(Calendar.MINUTE, alarmCalendar.get(Calendar.MINUTE))
                     calendar.set(Calendar.SECOND, 0)
                     calendar.set(Calendar.MILLISECOND, 0)
 
-                    // If the alarm time is in the past for today, schedule it for tomorrow
                     if (calendar.before(Calendar.getInstance())) {
                         calendar.add(Calendar.DATE, 1)
                     }
 
-                    // Create the intent to be fired when the alarm goes off
+                    // The intent only needs to know about the alarm, not the full med objects
                     val alarmIntent = Intent(this, AlarmReceiver::class.java).apply {
-                        // Pass data to the receiver, like the list of medications
                         putExtra("ALARM_TIME", alarm.alarmTime)
                         putExtra("REQUEST_CODE", alarm.requestCode)
                     }
 
                     val pendingIntent = PendingIntent.getBroadcast(
                         this,
-                        alarm.requestCode, // Use the unique request code from Firestore
+                        alarm.requestCode,
                         alarmIntent,
                         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                     )
 
                     val alarmClockInfo = AlarmManager.AlarmClockInfo(calendar.timeInMillis, null)
                     alarmManager.setAlarmClock(alarmClockInfo, pendingIntent)
-
                     Log.d("AlarmActivity", "SUCCESS: Android alarm set for ${alarm.alarmTime} with code ${alarm.requestCode}")
-
                 }
             } catch (e: Exception) {
                 Log.e("AlarmActivity", "Failed to parse alarm time: ${alarm.alarmTime}", e)
-                Toast.makeText(this, "Invalid time format for alarm: ${alarm.alarmTime}", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    // In AlarmActivity.kt
-
     private fun cancelAndroidAlarm(requestCode: Int) {
         val alarmIntent = Intent(this, AlarmReceiver::class.java)
         val pendingIntent = PendingIntent.getBroadcast(
-            this,
-            requestCode,
-            alarmIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE
+            this, requestCode, alarmIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE
         )
 
         if (pendingIntent != null) {
@@ -427,6 +449,5 @@ class AlarmActivity : AppCompatActivity() {
             Log.w("AlarmActivity", "Could not find alarm to cancel with code $requestCode")
         }
     }
-
-
 }
+
