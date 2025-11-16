@@ -30,6 +30,8 @@ import java.io.File
 import java.io.FileWriter
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 @androidx.annotation.OptIn(ExperimentalGetImage::class)
 class ScannerActivity : AppCompatActivity() {
@@ -37,6 +39,9 @@ class ScannerActivity : AppCompatActivity() {
     private lateinit var viewBinding: ActivityScannerBinding
     private lateinit var imageCapture: ImageCapture
     private lateinit var cameraExecutor: ExecutorService
+
+    private val db = FirebaseFirestore.getInstance()
+    val user = FirebaseAuth.getInstance().currentUser
 
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
