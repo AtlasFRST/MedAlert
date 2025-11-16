@@ -146,7 +146,8 @@ class ScannerActivity : AppCompatActivity() {
     private fun recognizeText(imageProxy: ImageProxy) {
         val mediaImage = imageProxy.image
         if (mediaImage == null) {
-            imageProxy.close(); return
+            imageProxy.close()
+            return
         }
 
         val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
@@ -157,40 +158,33 @@ class ScannerActivity : AppCompatActivity() {
 
                 val parsed = LabelParser.parse(visionText.text)
 
+                imageProxy.close()
+
+
                 if (parsed != null) {
-                    val rawDrug = parsed.drugName.orEmpty()
+                    val summary = buildString {
+                        appendLine("Patient: ${parsed.patientName ?: "(unknown)"}")
+                        appendLine("Drug: ${parsed.drugName ?: "(unknown)"}")
+                        appendLine("Directions: ${parsed.directions ?: "(none)"}")
+                        parsed.strength?.let { appendLine("Strength: $it") }
+                        parsed.form?.let { appendLine("Form: $it") }
+                        parsed.rxNumber?.let { appendLine("Rx#: $it") }
+                    }
 
-                    // launch a coroutine tied to Activity lifecycle
-                    lifecycleScope.launch {
-                        verifyDrugNameWithRxNorm(rawDrug) { chosenName, chosenRxcui ->
-                            confirmedDrugName = chosenName
-                            confirmedRxcui = chosenRxcui
+                    runOnUiThread {
+                        viewBinding.textResult.text = summary
+                        Toast.makeText(
+                            this@ScannerActivity,
+                            "Text recognized and parsed",
+                            Toast.LENGTH_SHORT
+                        ).show()
 
-                            val summary = buildString {
-                                appendLine("Patient: ${parsed.patientName ?: "(unknown)"}")
-                                appendLine("Drug (raw): ${parsed.drugName}")
-                                appendLine("Drug (RxNorm): ${confirmedDrugName ?: "(no match)"}")
-                                appendLine("RxCUI: ${confirmedRxcui ?: "(—)"}")
-                                appendLine("Directions: ${parsed.directions}")
-                                parsed.strength?.let { appendLine("Strength: $it") }
-                                parsed.form?.let { appendLine("Form: $it") }
-                                parsed.rxNumber?.let { appendLine("Rx#: $it") }
-                            }
-
-                            runOnUiThread {
-                                viewBinding.textResult.text = summary
-                                Toast.makeText(
-                                    this@ScannerActivity,
-                                    if (confirmedDrugName != null) "Matched via RxNorm ✔" else "No RxNorm match",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-
-                            // Persist (CSV still keeps original columns; add RxNorm if you want)
-                            saveParsedToCsv(parsed)
-                            Log.d(TAG, "Entry JSON:\n${parsed.toJsonString()}")
+                        // Show confirmation dialog before saving
+                        showParsedConfirmationDialog(parsed) {
+                            saveParsedToFirebase(parsed)
                         }
                     }
+
                 } else {
                     runOnUiThread {
                         viewBinding.textResult.text = visionText.text
@@ -318,6 +312,36 @@ class ScannerActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "ScannerActivity"
+    }
+}
+
+private fun showParsedConfirmationDialog(
+        parsed:MedicationEntry,
+        onConfirm: () -> Unit
+    ) {
+        val previewText = buildString {
+            appendLine("Patient: ${parsed.patientName ?: "(unknown)"}")
+            appendLine("Drug: ${parsed.drugName ?: "(unknown)"}")
+            appendLine("Strength: ${parsed.strength ?: "(unknown)"}")
+            appendLine("Form: ${parsed.form ?: "(unknown)"}")
+            appendLine("Directions: ${parsed.directions ?: "(unknown)"}")
+
+        }
+
+        AlertDialog.Builder(this@ScannerActivity)
+            .setTitle("Confirm Prescription Details")
+            .setMessage(previewText)
+            .setCancelable(false)
+            .setPositiveButton("Confirm") { dialog, _ ->
+                onConfirm()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Retake") { dialog, _ ->
+                Toast.makeText(this, "Retake the photo", Toast.LENGTH_SHORT).show()
+                startCamera()
+                dialog.dismiss()
+            }
+            .show()
     }
 }
 
