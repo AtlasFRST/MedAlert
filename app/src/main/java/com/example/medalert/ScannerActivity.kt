@@ -150,6 +150,7 @@ class ScannerActivity : AppCompatActivity() {
         }
 
         val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+
         recognizer.process(image)
             .addOnSuccessListener { visionText ->
                 Log.d(TAG, "Recognized text: ${visionText.text}")
@@ -209,6 +210,8 @@ class ScannerActivity : AppCompatActivity() {
                 imageProxy.close()
             }
     }
+
+
 
     /**
      * Look up each word in the scanned drugName using RxNorm Approximate Term.
