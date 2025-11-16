@@ -39,9 +39,9 @@ class ScannerActivity : AppCompatActivity() {
     private lateinit var viewBinding: ActivityScannerBinding
     private lateinit var imageCapture: ImageCapture
     private lateinit var cameraExecutor: ExecutorService
-
     private val db = FirebaseFirestore.getInstance()
     val user = FirebaseAuth.getInstance().currentUser
+
 
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
@@ -156,7 +156,6 @@ class ScannerActivity : AppCompatActivity() {
         }
 
         val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-
         recognizer.process(image)
             .addOnSuccessListener { visionText ->
                 Log.d(TAG, "Recognized text: ${visionText.text}")
@@ -212,102 +211,38 @@ class ScannerActivity : AppCompatActivity() {
 
 
 
-    /**
-     * Look up each word in the scanned drugName using RxNorm Approximate Term.
-     * If multiple good matches exist, prompt the user to pick.
-     */
-    private suspend fun verifyDrugNameWithRxNorm(
-        drugName: String,
-        onDone: (standardName: String?, rxcui: String?) -> Unit
-    ) {
-        if (drugName.isBlank()) {
-            onDone(null, null); return
+
+
+    private fun saveParsedToFirebase(parsed: MedicationEntry) {
+        if (user == null) {
+            Toast.makeText(this, "No user logged in", Toast.LENGTH_SHORT).show()
+            return
         }
 
-        val tokens = drugName
-            .split("\\s+".toRegex())
-            .map { it.trim().replace("[^A-Za-z0-9-]".toRegex(), "") }
-            .filter { it.length >= 3 }
-            .take(6)
+        val userId = user.uid
 
-        if (tokens.isEmpty()) {
-            onDone(null, null); return
-        }
+        val data = hashMapOf(
+            "Directions" to parsed.directions,
+            "Drug name" to parsed.drugName,
+            "Form" to parsed.form,
+            "Rxnum" to parsed.rxNumber,
+            "Strength" to parsed.strength,
+            "timestamp" to System.currentTimeMillis()
+        )
 
-        val candidates = mutableListOf<Candidate>()
 
-        withContext(Dispatchers.IO) {
-            for (t in tokens) {
-                try {
-                    val resp = RxNormClient.api.approximateTerm(t)
-                    candidates += resp.approximateGroup?.candidate.orEmpty()
-                } catch (e: Exception) {
-                    Log.w(TAG, "RxNorm lookup failed for '$t': ${e.message}")
-                }
+        db.collection("userMedications")
+            .document("users")
+           .collection(userId)
+            .add(data)
+            .addOnSuccessListener { doc ->
+                Log.d("ScannerActivity", "Saved under user $userId with ID: ${doc.id}")
+                Toast.makeText(this, "Saved medication", Toast.LENGTH_SHORT).show()
             }
-        }
-
-        val merged = candidates
-            .groupBy { (it.rxcui ?: "") + "|" + (it.name ?: "") }
-            .map { (_, group) -> group.maxByOrNull { it.score?.toIntOrNull() ?: -1 }!! }
-            .sortedByDescending { it.score?.toIntOrNull() ?: -1 }
-            .take(20)
-
-        when {
-            merged.isEmpty() -> onDone(null, null)
-            merged.size == 1 -> {
-                val c = merged.first()
-                onDone(c.name, c.rxcui)
+            .addOnFailureListener { e ->
+                Log.e("ScannerActivity", "Failed to save medication", e)
+                Toast.makeText(this, "Failed to save", Toast.LENGTH_SHORT).show()
             }
-            else -> {
-                runOnUiThread {
-                    val items = merged.map {
-                        "${it.name ?: "(unknown)"}  [RxCUI: ${it.rxcui ?: "—"} | score ${it.score ?: "?"}]"
-                    }.toTypedArray()
-
-                    AlertDialog.Builder(this@ScannerActivity)
-                        .setTitle("Select the correct medication")
-                        .setItems(items) { dialog, which ->
-                            val chosen = merged[which]
-                            onDone(chosen.name, chosen.rxcui)
-                            dialog.dismiss()
-                        }
-                        .setNegativeButton("Cancel") { dialog, _ ->
-                            onDone(null, null)
-                            dialog.dismiss()
-                        }
-                        .show()
-                }
-            }
-        }
-    }
-
-    private fun saveParsedToCsv(parsed: MedicationEntry) {
-        try {
-            val file = File(getExternalFilesDir(null), "parsed_labels.csv")
-            val isNewFile = !file.exists()
-            FileWriter(file, true).use { writer ->
-                if (isNewFile) {
-                    writer.appendLine("Timestamp,Patient,Drug,Directions,Strength,Form,RxNumber")
-                }
-                val timestamp = System.currentTimeMillis()
-                val row = listOf(
-                    timestamp.toString(),
-                    parsed.patientName ?: "",
-                    parsed.drugName ?: "",
-                    parsed.directions ?: "",
-                    parsed.strength ?: "",
-                    parsed.form ?: "",
-                    parsed.rxNumber ?: ""
-                ).joinToString(",")
-                writer.appendLine(row)
-            }
-            Log.d(TAG, "CSV saved: ${file.absolutePath}")
-            Toast.makeText(this, "Saved to CSV ✔", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error saving CSV", e)
-            Toast.makeText(this, "Failed to save CSV", Toast.LENGTH_SHORT).show()
-        }
     }
 
     override fun onDestroy() {
@@ -318,9 +253,8 @@ class ScannerActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "ScannerActivity"
     }
-}
 
-private fun showParsedConfirmationDialog(
+    private fun showParsedConfirmationDialog(
         parsed:MedicationEntry,
         onConfirm: () -> Unit
     ) {
@@ -349,6 +283,77 @@ private fun showParsedConfirmationDialog(
             .show()
     }
 }
+
+
+/**
+ * Look up each word in the scanned drugName using RxNorm Approximate Term.
+ * If multiple good matches exist, prompt the user to pick.
+
+private suspend fun verifyDrugNameWithRxNorm(
+drugName: String,
+onDone: (standardName: String?, rxcui: String?) -> Unit
+) {
+if (drugName.isBlank()) {
+onDone(null, null); return
+}
+
+val tokens = drugName
+.split("\\s+".toRegex())
+.map { it.trim().replace("[^A-Za-z0-9-]".toRegex(), "") }
+.filter { it.length >= 3 }
+.take(6)
+
+if (tokens.isEmpty()) {
+onDone(null, null); return
+}
+
+val candidates = mutableListOf<Candidate>()
+
+withContext(Dispatchers.IO) {
+for (t in tokens) {
+try {
+val resp = RxNormClient.api.approximateTerm(t)
+candidates += resp.approximateGroup?.candidate.orEmpty()
+} catch (e: Exception) {
+Log.w(TAG, "RxNorm lookup failed for '$t': ${e.message}")
+}
+}
+}
+
+val merged = candidates
+.groupBy { (it.rxcui ?: "") + "|" + (it.name ?: "") }
+.map { (_, group) -> group.maxByOrNull { it.score?.toIntOrNull() ?: -1 }!! }
+.sortedByDescending { it.score?.toIntOrNull() ?: -1 }
+.take(20)
+
+when {
+merged.isEmpty() -> onDone(null, null)
+merged.size == 1 -> {
+val c = merged.first()
+onDone(c.name, c.rxcui)
+}
+else -> {
+runOnUiThread {
+val items = merged.map {
+"${it.name ?: "(unknown)"}  [RxCUI: ${it.rxcui ?: "—"} | score ${it.score ?: "?"}]"
+}.toTypedArray()
+
+AlertDialog.Builder(this@ScannerActivity)
+.setTitle("Select the correct medication")
+.setItems(items) { dialog, which ->
+val chosen = merged[which]
+onDone(chosen.name, chosen.rxcui)
+dialog.dismiss()
+}
+.setNegativeButton("Cancel") { dialog, _ ->
+onDone(null, null)
+dialog.dismiss()
+}
+.show()
+}
+}
+}
+} */
 
 //OLD SCANNER ACTIVITY
 /*package com.example.medalert
