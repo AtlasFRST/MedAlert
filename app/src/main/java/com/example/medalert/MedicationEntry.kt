@@ -1,12 +1,15 @@
 package com.example.medalert
 
+import android.R
+
 data class MedicationEntry(
     val patientName: String? = null,
     val drugName: String,
     val directions: String,
     val rxNumber: String? = null,
     val strength: String? = null,
-    val form: String? = null
+    val form: String? = null,
+    val timesPerDay: Int? = null
 )
 
 // super-light “storage” helpers (works for Firestore later)
@@ -17,7 +20,8 @@ fun MedicationEntry.toMap(): Map<String, Any?> = mapOf(
     "rxNumber" to rxNumber,
     "strength" to strength,
     "form" to form,
-    "createdAt" to System.currentTimeMillis()
+    "createdAt" to System.currentTimeMillis(),
+    "timesPerDay" to timesPerDay
 )
 
 // quick JSON without extra libraries (android org.json)

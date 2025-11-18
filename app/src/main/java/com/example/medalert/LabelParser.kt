@@ -21,6 +21,7 @@ object LabelParser {
             line.substringAfter(":", line).trim()
         } ?: ""
 
+        val timesPerDay = extractTimesPerDay(directions)
 
         val drugLine = lines.firstOrNull {
             Regex("""\b(\d+(\.\d+)?)\s*(mg|mcg|g|ml)\b""", RegexOption.IGNORE_CASE).containsMatchIn(it)
@@ -51,6 +52,43 @@ object LabelParser {
             strength = strength,
             form = form
         )
+    }
+
+    private fun extractTimesPerDay(dir: String): Int? {
+        val text = dir.lowercase()
+
+        // 1. "3 times a day", "2 times daily", etc.
+        Regex("""(\d+)\s*(times|x)\s*(a\s*day|daily|per\s*day)""").find(text)?.let {
+            return it.groupValues[1].toInt()
+        }
+
+        // 2. "take 3x/day", "3x per day"
+        Regex("""(\d+)\s*x\s*/\s*day""").find(text)?.let {
+            return it.groupValues[1].toInt()
+        }
+
+        // 3. Words: once, twice, thrice
+        when {
+            text.contains("once a day") || text.contains("once daily") || text.contains("qday") -> return 1
+            text.contains("twice a day") || text.contains("two times a day") -> return 2
+            text.contains("thrice a day") || text.contains("three times a day") -> return 3
+        }
+
+        // 4. Medical abbreviations
+        when {
+            text.contains("qd") -> return 1
+            text.contains("bid") -> return 2
+            text.contains("tid") -> return 3
+            text.contains("qid") -> return 4
+        }
+
+        // 5. q12h, q8h, q6h → convert hours to times/day
+        Regex("""q(\d+)\s*h""").find(text)?.let {
+            val hours = it.groupValues[1].toInt()
+            if (hours > 0) return 24 / hours
+        }
+
+        return null
     }
 
     private fun guessPatientName(lines: List<String>): String? {

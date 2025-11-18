@@ -173,6 +173,7 @@ class ScannerActivity : AppCompatActivity() {
                         parsed.strength?.let { appendLine("Strength: $it") }
                         parsed.form?.let { appendLine("Form: $it") }
                         parsed.rxNumber?.let { appendLine("Rx#: $it") }
+                        parsed.timesPerDay?.let { appendLine("Times per day: $it") }
                     }
 
                     runOnUiThread {
@@ -227,7 +228,10 @@ class ScannerActivity : AppCompatActivity() {
             "Form" to parsed.form,
             "Rxnum" to parsed.rxNumber,
             "Strength" to parsed.strength,
-            "timestamp" to System.currentTimeMillis()
+            "timestamp" to System.currentTimeMillis(),
+            "timesPerDay" to parsed.timesPerDay
+
+
         )
 
 
@@ -264,6 +268,7 @@ class ScannerActivity : AppCompatActivity() {
             appendLine("Strength: ${parsed.strength ?: "(unknown)"}")
             appendLine("Form: ${parsed.form ?: "(unknown)"}")
             appendLine("Directions: ${parsed.directions ?: "(unknown)"}")
+            appendLine("Times per day: ${parsed.timesPerDay ?: "(unknown)"}")
 
         }
 
