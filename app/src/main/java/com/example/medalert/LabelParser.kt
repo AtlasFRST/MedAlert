@@ -57,9 +57,9 @@ object LabelParser {
     private fun extractTimesPerDay(dir: String): Int? {
         val text = dir.lowercase()
 
-        // 1. "3 times a day", "2 times daily", etc.
-        Regex("""(\d+)\s*(times|x)\s*(a\s*day|daily|per\s*day)""").find(text)?.let {
-            return it.groupValues[1].toInt()
+        // 1. numbers + "time(s)" + optional daily context
+        Regex("""(\d+)\s*times?\s*(a\s*day|daily|per\s*day)?""").find(text)?.let {
+        return it.groupValues[1].toInt()
         }
 
         // 2. "take 3x/day", "3x per day"
@@ -88,7 +88,7 @@ object LabelParser {
             if (hours > 0) return 24 / hours
         }
 
-        return null
+        return 1
     }
 
     private fun guessPatientName(lines: List<String>): String? {
