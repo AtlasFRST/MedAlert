@@ -38,7 +38,10 @@ object LabelParser {
                 RegexOption.IGNORE_CASE).find(it)?.value?.lowercase()
         }
 
-        val drugName = drugLine?.replace(Regex("""^(Rx\s*Only|Rx)\s*:?""", RegexOption.IGNORE_CASE), "")?.trim()
+        val drugName = drugLine
+            ?.replace(Regex("""^(Rx\s*Only|Rx)\s*:?""", RegexOption.IGNORE_CASE), "")
+            ?.replace(Regex("""\b\d+.*"""), "")   // remove numbers and everything after
+            ?.trim()
             ?: return null
 
         val rxNumber = lines.firstOrNull { it.startsWith("Rx", true) && it.contains("#") }
