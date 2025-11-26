@@ -72,9 +72,9 @@ object LabelParser {
 
         // 3. Words: once, twice, thrice
         when {
-            text.contains("once a day") || text.contains("once daily") || text.contains("qday") -> return 1
-            text.contains("twice a day") || text.contains("two times a day") -> return 2
-            text.contains("thrice a day") || text.contains("three times a day") -> return 3
+            text.contains("once") || text.contains("once daily") || text.contains("qday")  || text.contains("once per day")-> return 1
+            text.contains("twice") || text.contains("two times") -> return 2
+            text.contains("thrice") || text.contains("three times") -> return 3
         }
 
         // 4. Medical abbreviations
