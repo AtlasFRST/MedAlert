@@ -145,7 +145,7 @@ class AlarmActivity : AppCompatActivity() {
     private fun updateUiWithAlarms(alarms: List<Alarm>) {
         alarmsList.clear()
         // Here, we pass the full medication list to the adapter so it can find details
-        alarmsList.addAll(alarms.sortedBy { it.alarmTime })
+        alarmsList.addAll(alarms.sortedBy { get24HourString(it.alarmTime) })
         alarmAdapter.notifyDataSetChanged() // The adapter will now have both new lists
 
         tvNoAlarms.visibility = if (alarmsList.isEmpty()) View.VISIBLE else View.GONE
@@ -202,6 +202,18 @@ class AlarmActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun get24HourString(time: String): String {
+        return try {
+            val inputFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+            val outputFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+            val date = inputFormat.parse(time)
+            if (date != null) outputFormat.format(date) else time
+        } catch (e: Exception) {
+
+            time
+        }
     }
 
     private fun askForAlarmTime(medication: Medication, currentAlarmNum: Int, totalAlarms: Int, onComplete: (List<String>) -> Unit) {
@@ -334,7 +346,7 @@ class AlarmActivity : AppCompatActivity() {
             // 2. Create new alarms or add to existing ones
             val existingAlarms = userProfile.alarms.toMutableList()
             for (time in alarmTimes) {
-                val alarmIndex = existingAlarms.indexOfFirst { it.alarmTime == time }
+                val alarmIndex = existingAlarms.indexOfFirst { get24HourString(it.alarmTime) == get24HourString(time) }
                 if (alarmIndex != -1) {
                     // An alarm for this time already exists, just add the medication name
                     val alarmToUpdate = existingAlarms[alarmIndex]
