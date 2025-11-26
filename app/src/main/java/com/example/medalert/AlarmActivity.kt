@@ -59,6 +59,8 @@ class AlarmActivity : AppCompatActivity() {
         }
 
         loadAlarmsFromFirestore()
+
+        handleScannedData() //new
     }
 
     private fun setupRecyclerView() {
@@ -71,6 +73,49 @@ class AlarmActivity : AppCompatActivity() {
     }
 
     // --- DATA LOADING & UI ---
+
+
+    private fun handleScannedData() {
+        // Check if the intent that started this activity has needed data
+        if (intent.hasExtra("SCANNED_DRUG_NAME") && intent.hasExtra("SCANNED_TIMES_PER_DAY")) {
+            val drugName = intent.getStringExtra("SCANNED_DRUG_NAME")
+            val timesPerDay = intent.getIntExtra("SCANNED_TIMES_PER_DAY", 1)
+            val pillsRemaining = intent.getIntExtra("SCANNED_PILLS_REMAINING", 0) // Optional
+
+            if (drugName != null) {
+                // If this medication already exists, don't re-add it
+                // Prevents duplicates
+                if (masterMedicationList.any { it.name.equals(drugName, ignoreCase = true) }) {
+                    Toast.makeText(this, "'$drugName' is already in your list.", Toast.LENGTH_LONG).show()
+                    return
+                }
+
+                // Create a new Medication object from the scanned data
+                val newMed = Medication(
+                    name = drugName,
+                    pillsRemaining = pillsRemaining,
+                    timesPerDay = timesPerDay
+                )
+
+                // Check for matching schedules
+                checkForMatchingSchedules(newMed) { userWantsToCreateNew ->
+                    if (userWantsToCreateNew) {
+                        // User wants a new schedule, so we ask for the times.
+                        askForAlarmTime(newMed, 1, newMed.timesPerDay) { alarmTimes ->
+                            if (alarmTimes.isNotEmpty()) {
+                                saveNewMedicationAndAlarms(newMed, alarmTimes)
+                            }
+                        }
+                    }
+                    // If 'false', the medication was added to an existing schedule and we're done.
+                }
+
+                // Clear the extras from the intent so this doesn't re-trigger on configuration changes
+                intent.removeExtra("SCANNED_DRUG_NAME")
+                intent.removeExtra("SCANNED_TIMES_PER_DAY")
+            }
+        }
+    }
 
     private fun loadAlarmsFromFirestore() {
         if (userId == null) return

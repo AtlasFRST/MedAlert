@@ -39,8 +39,8 @@ class ScannerActivity : AppCompatActivity() {
     private lateinit var viewBinding: ActivityScannerBinding
     private lateinit var imageCapture: ImageCapture
     private lateinit var cameraExecutor: ExecutorService
-    private val db = FirebaseFirestore.getInstance()
-    val user = FirebaseAuth.getInstance().currentUser
+    //private val db = FirebaseFirestore.getInstance()
+    //val user = FirebaseAuth.getInstance().currentUser
 
 
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -185,9 +185,12 @@ class ScannerActivity : AppCompatActivity() {
                         ).show()
 
                         // Show confirmation dialog before saving
+                        /*
                         showParsedConfirmationDialog(parsed) {
                             saveParsedToFirebase(parsed)
                         }
+                         */
+                        showParsedConfirmationDialog(parsed)
                     }
 
                 } else {
@@ -213,7 +216,7 @@ class ScannerActivity : AppCompatActivity() {
 
 
 
-
+    /*
     private fun saveParsedToFirebase(parsed: MedicationEntry) {
         if (user == null) {
             Toast.makeText(this, "No user logged in", Toast.LENGTH_SHORT).show()
@@ -249,6 +252,8 @@ class ScannerActivity : AppCompatActivity() {
             }
     }
 
+     */
+
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
@@ -258,6 +263,36 @@ class ScannerActivity : AppCompatActivity() {
         private const val TAG = "ScannerActivity"
     }
 
+    private fun showParsedConfirmationDialog(parsed: MedicationEntry) {
+        val previewText = buildString {
+            appendLine("Drug: ${parsed.drugName ?: "(unknown)"}")
+            appendLine("Times per day: ${parsed.timesPerDay ?: 1}") // Default to 1 if not parsed
+            appendLine("\nDirections: ${parsed.directions ?: "(unknown)"}")
+        }
+
+        AlertDialog.Builder(this@ScannerActivity)
+            .setTitle("Confirm Scanned Details")
+            .setMessage(previewText)
+            .setCancelable(false)
+            .setPositiveButton("Confirm and Set Alarms") { dialog, _ ->
+                // --- LAUNCH ALARM ACTIVITY WITH DATA
+                val intent = Intent(this, AlarmActivity::class.java).apply {
+                    putExtra("SCANNED_DRUG_NAME", parsed.drugName)
+                    // Use parsed value, or default to 1
+                    putExtra("SCANNED_TIMES_PER_DAY", parsed.timesPerDay ?: 1)
+                    // We can also pass pills remaining if the parser finds it
+                    // putExtra("SCANNED_PILLS_REMAINING", parsed.quantity ?: 0)
+                }
+                startActivity(intent)
+                finish() // Close the scanner after confirming
+                dialog.dismiss()
+            }
+            .setNegativeButton("Retake Photo") { dialog, _ ->
+                dialog.dismiss() // Just dismiss, camera is already running
+            }
+            .show()
+    }
+    /*
     private fun showParsedConfirmationDialog(
         parsed:MedicationEntry,
         onConfirm: () -> Unit
@@ -287,6 +322,8 @@ class ScannerActivity : AppCompatActivity() {
             }
             .show()
     }
+
+     */
 }
 
 
