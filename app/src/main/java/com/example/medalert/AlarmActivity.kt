@@ -37,7 +37,7 @@ class AlarmActivity : AppCompatActivity() {
     private lateinit var tvNoAlarms: TextView
     private lateinit var alarmAdapter: AlarmAdapter
 
-    // We now need to hold both lists locally to reconstruct the display
+    //hold both lists locally to reconstruct the display
     private val masterMedicationList = mutableListOf<Medication>()
     private val alarmsList = mutableListOf<Alarm>()
 
@@ -60,7 +60,7 @@ class AlarmActivity : AppCompatActivity() {
 
         loadAlarmsFromFirestore()
 
-        handleScannedData() //new
+        handleScannedData() 
     }
 
     private fun setupRecyclerView() {
@@ -72,7 +72,7 @@ class AlarmActivity : AppCompatActivity() {
         rvAlarms.layoutManager = LinearLayoutManager(this)
     }
 
-    // --- DATA LOADING & UI ---
+   
 
 
     private fun handleScannedData() {
