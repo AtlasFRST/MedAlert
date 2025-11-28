@@ -11,15 +11,20 @@ object LabelParser {
         }?.substringAfter(':')?.trim()
             ?: guessPatientName(lines)
 
-        val directions = lines.firstOrNull {
-            it.startsWith("Take", true) ||
-                    it.startsWith("Sig", true) ||
-                    it.startsWith("Directions", true) ||
-                    it.contains("by mouth", true) ||
-                    it.contains("po ", true)
-        }?.let { line ->
-            line.substringAfter(":", line).trim()
-        } ?: ""
+        val directionStartIndex = lines.indexOfFirst {
+            it.startsWith("take", true) ||
+                    it.startsWith("sig", true) ||
+                    it.startsWith("directions", true)
+        }
+
+        val directions = if (directionStartIndex != -1) {
+            lines.drop(directionStartIndex)
+                .takeWhile { it.isNotBlank() }
+                .joinToString(" ")
+                .lowercase()
+        } else {
+            ""
+        }
 
         val timesPerDay = extractTimesPerDay(directions)
 
@@ -53,6 +58,7 @@ object LabelParser {
             directions = directions.ifEmpty { "See label" },
             rxNumber = rxNumber,
             strength = strength,
+            timesPerDay = timesPerDay,
             form = form
         )
     }
@@ -60,36 +66,14 @@ object LabelParser {
     private fun extractTimesPerDay(dir: String): Int? {
         val text = dir.lowercase()
 
-        // 1. numbers + "time(s)" + optional daily context
-        Regex("""(\d+)\s*times?\s*(a\s*day|daily|per\s*day)?""").find(text)?.let {
-        return it.groupValues[1].toInt()
-        }
-
-        // 2. "take 3x/day", "3x per day"
-        Regex("""(\d+)\s*x\s*/\s*day""").find(text)?.let {
-            return it.groupValues[1].toInt()
-        }
-
-        // 3. Words: once, twice, thrice
         when {
-            text.contains("once") || text.contains("once daily") || text.contains("qday")  || text.contains("once per day")-> return 1
-            text.contains("twice") || text.contains("two times") -> return 2
-            text.contains("thrice") || text.contains("three times") -> return 3
+            Regex("""\btwice\b""").containsMatchIn(text) -> return 2
+            Regex("""\btwo\s+times\b""").containsMatchIn(text) -> return 2
+            Regex("""\bonce\b""").containsMatchIn(text) -> return 1
+            Regex("""\bthrice\b""").containsMatchIn(text) -> return 3
+            Regex("""\bthree\s+times\b""").containsMatchIn(text) -> return 3
         }
 
-        // 4. Medical abbreviations
-        when {
-            text.contains("qd") -> return 1
-            text.contains("bid") -> return 2
-            text.contains("tid") -> return 3
-            text.contains("qid") -> return 4
-        }
-
-        // 5. q12h, q8h, q6h → convert hours to times/day
-        Regex("""q(\d+)\s*h""").find(text)?.let {
-            val hours = it.groupValues[1].toInt()
-            if (hours > 0) return 24 / hours
-        }
 
         return 1
     }
