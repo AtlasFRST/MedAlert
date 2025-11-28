@@ -69,9 +69,11 @@ object LabelParser {
         when {
             Regex("""\btwice\b""").containsMatchIn(text) -> return 2
             Regex("""\btwo\s+times\b""").containsMatchIn(text) -> return 2
+            Regex("""\b2\s+times\b""").containsMatchIn(text) -> return 2
             Regex("""\bonce\b""").containsMatchIn(text) -> return 1
             Regex("""\bthrice\b""").containsMatchIn(text) -> return 3
             Regex("""\bthree\s+times\b""").containsMatchIn(text) -> return 3
+            Regex("""\b3\s+times\b""").containsMatchIn(text) -> return 3
         }
 
 
