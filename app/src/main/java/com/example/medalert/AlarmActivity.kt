@@ -144,7 +144,7 @@ class AlarmActivity : AppCompatActivity() {
 
     private fun updateUiWithAlarms(alarms: List<Alarm>) {
         alarmsList.clear()
-        // Here, we pass the full medication list to the adapter so it can find details
+       
         alarmsList.addAll(alarms.sortedBy { get24HourString(it.alarmTime) })
         alarmAdapter.notifyDataSetChanged() // The adapter will now have both new lists
 
@@ -152,7 +152,7 @@ class AlarmActivity : AppCompatActivity() {
         rvAlarms.visibility = if (alarmsList.isEmpty()) View.GONE else View.VISIBLE
     }
 
-    // --- ADD MEDICATION FLOW (REFACTORED) ---
+   
 
     private fun showAddAlarmDialog() {
         val medNameInput = EditText(this).apply { hint = "Medication Name" }
@@ -247,7 +247,7 @@ class AlarmActivity : AppCompatActivity() {
             .show()
     }
 
-    // --- "JOIN SCHEDULE" FLOW (REFACTORED) ---
+    
 
     private fun checkForMatchingSchedules(newMed: Medication, onComplete: (Boolean) -> Unit) {
         if (userId == null) {
@@ -329,7 +329,7 @@ class AlarmActivity : AppCompatActivity() {
         }
     }
 
-    // --- DATA SAVING (REFACTORED) ---
+    
 
     private fun saveNewMedicationAndAlarms(medication: Medication, alarmTimes: List<String>) {
         if (userId == null) return
@@ -379,7 +379,7 @@ class AlarmActivity : AppCompatActivity() {
         }
     }
 
-    // --- DELETE ALARM (REFACTORED) ---
+    
 
     private fun deleteAlarm(alarmToDelete: Alarm) {
         if (userId == null) return
@@ -439,7 +439,7 @@ class AlarmActivity : AppCompatActivity() {
     }
 
 
-    // --- ANDROID ALARM SCHEDULING (NO CHANGES NEEDED HERE) ---
+    
 
     private fun checkPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
