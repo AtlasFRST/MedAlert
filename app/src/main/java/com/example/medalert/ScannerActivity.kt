@@ -267,7 +267,7 @@ class ScannerActivity : AppCompatActivity() {
         val previewText = buildString {
             appendLine("Drug: ${parsed.drugName ?: "(unknown)"}")
             appendLine("Times per day: ${parsed.timesPerDay ?: 1}") // Default to 1 if not parsed
-            appendLine("\nDirections: ${parsed.directions ?: "(unknown)"}")
+            //appendLine("\nDirections: ${parsed.directions ?: "(unknown)"}") revisit
         }
 
         AlertDialog.Builder(this@ScannerActivity)

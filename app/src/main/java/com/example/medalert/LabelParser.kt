@@ -28,26 +28,89 @@ object LabelParser {
 
         val timesPerDay = extractTimesPerDay(directions)
 
-        val drugLine = lines.firstOrNull {
+        /*val drugLine = lines.firstOrNull {
             Regex("""\b(\d+(\.\d+)?)\s*(mg|mcg|g|ml)\b""", RegexOption.IGNORE_CASE).containsMatchIn(it)
         } ?: lines.firstOrNull {
             it.contains("tablet", true) || it.contains("capsule", true) || it.contains("tab", true) || it.contains("cap", true)
+        } ?: lines.firstOrNull { it.matches(Regex("""[A-Za-z][A-Za-z0-9\-\s]+""")) }*/
+        // Find the line that likely contains the drug + strength
+        val drugLine = lines.firstOrNull {
+            Regex("""\b(\d+(\.\d+)?)\s*(mg|mcg|g|ml)\b""", RegexOption.IGNORE_CASE)
+                .containsMatchIn(it)
+        } ?: lines.firstOrNull {
+            it.contains("tablet", true) || it.contains("capsule", true) ||
+                    it.contains("tab", true) || it.contains("cap", true)
         } ?: lines.firstOrNull { it.matches(Regex("""[A-Za-z][A-Za-z0-9\-\s]+""")) }
+
 
         val strength = drugLine?.let {
             Regex("""\b(\d+(\.\d+)?)\s*(mg|mcg|g|ml)\b""", RegexOption.IGNORE_CASE).find(it)?.value
         }
+
 
         val form = drugLine?.let {
             Regex("""\b(tablet|tab|capsule|cap|solution|suspension|syrup|cream|ointment|patch|inhaler)\b""",
                 RegexOption.IGNORE_CASE).find(it)?.value?.lowercase()
         }
 
-        val drugName = drugLine
+        /*val drugName = drugLine
             ?.replace(Regex("""^(Rx\s*Only|Rx)\s*:?""", RegexOption.IGNORE_CASE), "")
             ?.replace(Regex("""\b\d+.*"""), "")   // remove numbers and everything after
             ?.trim()
             ?: return null
+        // Extract drug name: take text BEFORE the first dosage pattern (e.g., "20 mg")
+        val drugName = drugLine
+            ?.let {
+                val parts = it.split(Regex("""\b\d+(\.\d+)?\s*(mg|mcg|g|ml)\b""", RegexOption.IGNORE_CASE))
+                parts.firstOrNull()?.trim()
+            }
+            ?.split(" ")          // Break into tokens
+            ?.filter { it.isNotBlank() }
+            ?.take(2)             // Allow 1 or 2-word drug names
+            ?.joinToString(" ")
+            ?.replace(Regex("""[^A-Za-z]"""), "")  // Remove weird characters
+            ?.trim()
+            ?: return null*/
+
+
+// ---- DRUG NAME EXTRACTION + NORMALIZATION ----
+        val drugName = drugLine
+            // Take only the part BEFORE the first strength like "20 mg"
+            ?.let { line ->
+                val parts = line.split(
+                    Regex("""\b\d+(\.\d+)?\s*(mg|mcg|g|ml)\b""", RegexOption.IGNORE_CASE)
+                )
+                parts.firstOrNull()?.trim()
+            }
+            // Split into words
+            ?.split(Regex("\\s+"))
+            ?.filter { it.isNotBlank() }
+            ?.let { tokens ->
+                // Common release / form suffixes that we want to drop from the END
+                val suffixes = setOf(
+                    "er", "xr", "sr", "cr", "dr", "ir", "xl", "la",
+                    "cd", "cr", "hcl", "tab", "tablet", "cap", "capsule"
+                )
+
+                // If last token is in suffix list, drop it (e.g., "Verapamil ER" -> "Verapamil")
+                val cleaned = if (tokens.size >= 2 && tokens.last().lowercase() in suffixes) {
+                    tokens.dropLast(1)
+                } else {
+                    tokens
+                }
+
+                // Allow up to 3-word base names (e.g., "Amoxicillin Clavulanate")
+                cleaned.take(3)
+            }
+            // Join back into a name
+            ?.joinToString(" ")
+            // Strip non-letter characters
+            ?.replace(Regex("""[^A-Za-z\s]"""), "")
+            ?.trim()
+        // Ensure non-null for MedicationEntry (drugName is String, not String?)
+            ?: return null
+
+
 
         val rxNumber = lines.firstOrNull { it.startsWith("Rx", true) && it.contains("#") }
             ?.substringAfter('#')?.trim()
