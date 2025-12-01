@@ -1,17 +1,18 @@
 package com.example.medalert
 
+import android.Manifest
 import android.app.AlarmManager
 import com.example.medalert.models.Alarm
 import com.example.medalert.models.Medication
 import com.example.medalert.models.UserProfile
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.toObject
 import android.app.AlertDialog
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.icu.util.Calendar
 import android.os.Build
 import android.os.Bundle
@@ -23,7 +24,9 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.firestore.SetOptions
@@ -37,16 +40,37 @@ class AlarmActivity : AppCompatActivity() {
     private lateinit var tvNoAlarms: TextView
     private lateinit var alarmAdapter: AlarmAdapter
 
-    //hold both lists locally to reconstruct the display
     private val masterMedicationList = mutableListOf<Medication>()
     private val alarmsList = mutableListOf<Alarm>()
 
     private val db = FirebaseFirestore.getInstance()
     private val userId = FirebaseAuth.getInstance().currentUser?.uid
 
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            Log.d("AlarmActivity", "Notification permission granted.")
+        } else {
+            Toast.makeText(this, "Notifications will not be shown without permission.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun askNotificationPermission() {
+        // This is only necessary for API level 33+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                // Directly ask for the permission
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_alarm)
+
+        askNotificationPermission()
 
         alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         rvAlarms = findViewById(R.id.rvAlarms)
@@ -60,7 +84,7 @@ class AlarmActivity : AppCompatActivity() {
 
         loadAlarmsFromFirestore()
 
-        handleScannedData() 
+        handleScannedData()
     }
 
     private fun setupRecyclerView() {
@@ -72,7 +96,7 @@ class AlarmActivity : AppCompatActivity() {
         rvAlarms.layoutManager = LinearLayoutManager(this)
     }
 
-   
+
 
 
     private fun handleScannedData() {
@@ -144,7 +168,7 @@ class AlarmActivity : AppCompatActivity() {
 
     private fun updateUiWithAlarms(alarms: List<Alarm>) {
         alarmsList.clear()
-       
+
         alarmsList.addAll(alarms.sortedBy { get24HourString(it.alarmTime) })
         alarmAdapter.notifyDataSetChanged() // The adapter will now have both new lists
 
@@ -152,7 +176,7 @@ class AlarmActivity : AppCompatActivity() {
         rvAlarms.visibility = if (alarmsList.isEmpty()) View.GONE else View.VISIBLE
     }
 
-   
+
 
     private fun showAddAlarmDialog() {
         val medNameInput = EditText(this).apply { hint = "Medication Name" }
@@ -247,7 +271,7 @@ class AlarmActivity : AppCompatActivity() {
             .show()
     }
 
-    
+
 
     private fun checkForMatchingSchedules(newMed: Medication, onComplete: (Boolean) -> Unit) {
         if (userId == null) {
@@ -329,7 +353,7 @@ class AlarmActivity : AppCompatActivity() {
         }
     }
 
-    
+
 
     private fun saveNewMedicationAndAlarms(medication: Medication, alarmTimes: List<String>) {
         if (userId == null) return
@@ -379,7 +403,7 @@ class AlarmActivity : AppCompatActivity() {
         }
     }
 
-    
+
 
     private fun deleteAlarm(alarmToDelete: Alarm) {
         if (userId == null) return
@@ -439,7 +463,7 @@ class AlarmActivity : AppCompatActivity() {
     }
 
 
-    
+
 
     private fun checkPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
