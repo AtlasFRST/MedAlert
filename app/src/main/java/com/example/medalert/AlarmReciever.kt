@@ -9,7 +9,7 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.google.firebase.auth.FirebaseAuth
+
 
 
 class AlarmReceiver : BroadcastReceiver() {
@@ -20,7 +20,14 @@ class AlarmReceiver : BroadcastReceiver() {
         val requestCode = intent.getIntExtra("REQUEST_CODE", 0)
         Log.d("AlarmReceiver", "ALARM TRIGGERED for time: $time")
 
-        val userId = FirebaseAuth.getInstance().currentUser?.uid
+        val userId = intent.getStringExtra("USER_ID")
+
+        if (userId == null) {
+            Log.e("AlarmReceiver", "CRITICAL: User ID not passed in intent. Cannot create notification action.")
+            return
+        }
+
+        Log.d("AlarmReceiver", "ALARM TRIGGERED for user: $userId, time: $time")
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
 
@@ -61,10 +68,10 @@ class AlarmReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val notification = NotificationCompat.Builder(context, channelId) // Use the correct channelId
+        val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("Medication Reminder")
-            .setContentText("It's time to take your medication ($time).") // Corrected variable
+            .setContentText("It's time to take your medication ($time).")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent) // Set the intent to open the app on tap
             .setAutoCancel(true)

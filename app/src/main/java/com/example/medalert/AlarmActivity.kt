@@ -497,6 +497,7 @@ class AlarmActivity : AppCompatActivity() {
                     val alarmIntent = Intent(this, AlarmReceiver::class.java).apply {
                         putExtra("ALARM_TIME", alarm.alarmTime)
                         putExtra("REQUEST_CODE", alarm.requestCode)
+                        putExtra("USER_ID", userId)
                     }
 
                     val pendingIntent = PendingIntent.getBroadcast(
