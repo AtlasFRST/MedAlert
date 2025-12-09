@@ -28,11 +28,7 @@ object LabelParser {
 
         val timesPerDay = extractTimesPerDay(directions)
 
-        /*val drugLine = lines.firstOrNull {
-            Regex("""\b(\d+(\.\d+)?)\s*(mg|mcg|g|ml)\b""", RegexOption.IGNORE_CASE).containsMatchIn(it)
-        } ?: lines.firstOrNull {
-            it.contains("tablet", true) || it.contains("capsule", true) || it.contains("tab", true) || it.contains("cap", true)
-        } ?: lines.firstOrNull { it.matches(Regex("""[A-Za-z][A-Za-z0-9\-\s]+""")) }*/
+        
         // Find the line that likely contains the drug + strength
         val drugLine = lines.firstOrNull {
             Regex("""\b(\d+(\.\d+)?)\s*(mg|mcg|g|ml)\b""", RegexOption.IGNORE_CASE)
@@ -53,27 +49,10 @@ object LabelParser {
                 RegexOption.IGNORE_CASE).find(it)?.value?.lowercase()
         }
 
-        /*val drugName = drugLine
-            ?.replace(Regex("""^(Rx\s*Only|Rx)\s*:?""", RegexOption.IGNORE_CASE), "")
-            ?.replace(Regex("""\b\d+.*"""), "")   // remove numbers and everything after
-            ?.trim()
-            ?: return null
-        // Extract drug name: take text BEFORE the first dosage pattern (e.g., "20 mg")
-        val drugName = drugLine
-            ?.let {
-                val parts = it.split(Regex("""\b\d+(\.\d+)?\s*(mg|mcg|g|ml)\b""", RegexOption.IGNORE_CASE))
-                parts.firstOrNull()?.trim()
-            }
-            ?.split(" ")          // Break into tokens
-            ?.filter { it.isNotBlank() }
-            ?.take(2)             // Allow 1 or 2-word drug names
-            ?.joinToString(" ")
-            ?.replace(Regex("""[^A-Za-z]"""), "")  // Remove weird characters
-            ?.trim()
-            ?: return null*/
+        
 
 
-// ---- DRUG NAME EXTRACTION + NORMALIZATION ----
+//drug name extraction
         val drugName = drugLine
             // Take only the part BEFORE the first strength like "20 mg"
             ?.let { line ->
