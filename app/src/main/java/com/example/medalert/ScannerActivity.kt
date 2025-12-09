@@ -109,6 +109,7 @@ class ScannerActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
+    
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
@@ -133,6 +134,7 @@ class ScannerActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    //takephoto to be recognized
     private fun takePhoto() {
         imageCapture.takePicture(
             cameraExecutor,
@@ -148,6 +150,9 @@ class ScannerActivity : AppCompatActivity() {
         )
     }
 
+
+    //take photo and return text from it
+    //also show text on screen
     private fun recognizeText(imageProxy: ImageProxy) {
         val mediaImage = imageProxy.image
         if (mediaImage == null) {
@@ -164,7 +169,7 @@ class ScannerActivity : AppCompatActivity() {
 
                 imageProxy.close()
 
-
+                // show text as it hass been parsed in bvbackgrouns
                 if (parsed != null) {
                     val summary = buildString {
                         appendLine("Patient: ${parsed.patientName ?: "(unknown)"}")
@@ -238,7 +243,7 @@ class ScannerActivity : AppCompatActivity() {
                     // Use parsed value, or default to 1
                     putExtra("SCANNED_TIMES_PER_DAY", parsed.timesPerDay ?: 1)
                     // We can also pass pills remaining if the parser finds it
-                    // putExtra("SCANNED_PILLS_REMAINING", parsed.quantity ?: 0)
+                   
                 }
                 startActivity(intent)
                 finish() // Close the scanner after confirming
